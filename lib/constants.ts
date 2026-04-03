@@ -1,15 +1,29 @@
-// Mock Compact language templates
-export const COMPACT_TEMPLATES = {
+export type TemplateKey = "counter" | "voting" | "token" | "blank";
+
+export interface TemplateFile {
+  name: string;
+  language: "compact" | "markdown" | "json";
+  content: string;
+}
+
+export const COMPACT_TEMPLATES: Record<
+  TemplateKey,
+  { name: string; description: string; files: TemplateFile[] }
+> = {
   counter: {
     name: "Counter",
     description: "Simple counter with increment and decrement circuits",
-    code: `pragma language_version >= 0.14.0;
+    files: [
+      {
+        name: "main.compact",
+        language: "compact",
+        content: `pragma language_version >= 0.14.0;
 
 import CompactStandardLibrary;
 
 // A simple counter contract demonstrating basic Compact patterns
 contract Counter {
-  
+
   // Ledger state: the counter value (public)
   ledger counter: Uint<32>;
 
@@ -19,7 +33,6 @@ contract Counter {
   }
 
   // Increment the counter by a given amount
-  // The amount is a witness (private input)
   export circuit increment(amount: Uint<32>): [] {
     counter = counter + amount;
   }
@@ -30,7 +43,7 @@ contract Counter {
     counter = counter - amount;
   }
 
-  // Reset counter to zero (admin circuit)
+  // Reset counter to zero
   export circuit reset(): [] {
     counter = 0;
   }
@@ -41,12 +54,41 @@ contract Counter {
   }
 }
 `,
+      },
+      {
+        name: "README.md",
+        language: "markdown",
+        content: `# Counter Contract
+
+A minimal on-chain counter demonstrating core Compact concepts.
+
+## Circuits
+
+| Circuit     | Parameters         | Returns    | Description                    |
+|-------------|--------------------|------------|--------------------------------|
+| increment   | amount: Uint<32>   | []         | Add to the counter             |
+| decrement   | amount: Uint<32>   | []         | Subtract with underflow guard  |
+| reset       | —                  | []         | Reset the counter to zero      |
+| getCount    | —                  | Uint<32>   | Read the current value         |
+
+## Quick Start
+
+1. Click **Run** to compile
+2. Open **Circuit Inspector**, select \`increment\`
+3. Set \`amount = 5\` and press Simulate
+`,
+      },
+    ],
   },
-  
+
   voting: {
     name: "Private Voting",
     description: "Zero-knowledge voting system with private ballots",
-    code: `pragma language_version >= 0.14.0;
+    files: [
+      {
+        name: "main.compact",
+        language: "compact",
+        content: `pragma language_version >= 0.14.0;
 
 import CompactStandardLibrary;
 
@@ -62,7 +104,7 @@ contract PrivateVoting {
 
   // Witness: the secret vote and voter commitment
   witness voterSecret: Bytes<32>;
-  witness voteChoice: Boolean;  // true = for, false = against
+  witness voteChoice: Boolean;
 
   constructor() {
     votesFor = 0;
@@ -72,17 +114,12 @@ contract PrivateVoting {
   }
 
   // Cast a private vote using ZK proof
-  // The circuit proves vote validity without revealing the choice
   export circuit castVote(
     voterCommitment: Bytes<32>
   ): [] {
     assert votingOpen, "Voting is closed";
-    
-    // ZK: prove commitment matches witness
     const computedCommitment = hash(voterSecret);
     assert computedCommitment == voterCommitment, "Invalid commitment";
-    
-    // Record vote privately
     if voteChoice {
       votesFor = votesFor + 1;
     } else {
@@ -103,12 +140,39 @@ contract PrivateVoting {
   }
 }
 `,
+      },
+      {
+        name: "README.md",
+        language: "markdown",
+        content: `# Private Voting Contract
+
+Zero-knowledge voting — ballots are private, tallies are public.
+
+## How It Works
+
+Voters use a **secret witness** and submit a **commitment** on-chain.
+The ZK proof verifies ballot validity without revealing the choice.
+
+## Circuits
+
+| Circuit      | Description                             |
+|--------------|-----------------------------------------|
+| castVote     | Submit a private ballot with ZK proof   |
+| closeVoting  | End the voting period (admin)           |
+| getResults   | Read aggregate totals after voting ends |
+`,
+      },
+    ],
   },
-  
+
   token: {
     name: "Private Token",
     description: "Confidential token transfer with hidden balances",
-    code: `pragma language_version >= 0.14.0;
+    files: [
+      {
+        name: "main.compact",
+        language: "compact",
+        content: `pragma language_version >= 0.14.0;
 
 import CompactStandardLibrary;
 
@@ -121,7 +185,7 @@ contract PrivateToken {
   ledger name: Bytes<32>;
   ledger symbol: Bytes<8>;
 
-  // Private: individual balances (commitment scheme)
+  // Private: witness variables for transfer proofs
   witness senderBalance: Uint<128>;
   witness receiverBalance: Uint<128>;
   witness transferAmount: Uint<128>;
@@ -139,28 +203,19 @@ contract PrivateToken {
   }
 
   // Transfer tokens privately
-  // Proves: sender has enough balance, balances update correctly
-  // Reveals: nothing about amounts or parties
   export circuit transfer(
     senderCommitment: Bytes<32>,
     receiverCommitment: Bytes<32>,
     newSenderCommitment: Bytes<32>,
     newReceiverCommitment: Bytes<32>
   ): [] {
-    // Verify sender has sufficient balance
     assert senderBalance >= transferAmount, "Insufficient balance";
-    
-    // Verify commitment integrity
     const computedSender = hash(senderSecret, senderBalance);
     assert computedSender == senderCommitment, "Invalid sender proof";
-    
     const computedReceiver = hash(receiverSecret, receiverBalance);
     assert computedReceiver == receiverCommitment, "Invalid receiver proof";
-    
-    // Verify new commitments are correct
     const newSenderBal = senderBalance - transferAmount;
     const newReceiverBal = receiverBalance + transferAmount;
-    
     assert hash(senderSecret, newSenderBal) == newSenderCommitment;
     assert hash(receiverSecret, newReceiverBal) == newReceiverCommitment;
   }
@@ -171,17 +226,43 @@ contract PrivateToken {
   }
 }
 `,
+      },
+      {
+        name: "README.md",
+        language: "markdown",
+        content: `# Confidential Token Contract
+
+Privacy-preserving token where individual balances remain hidden.
+
+## Architecture
+
+- **Public**: \`totalSupply\`, token \`name\` and \`symbol\`
+- **Private**: individual balances stored as cryptographic commitments
+
+## Circuits
+
+| Circuit   | Description                                   |
+|-----------|-----------------------------------------------|
+| transfer  | Move tokens privately with ZK balance proofs  |
+| mint      | Increase total supply                         |
+`,
+      },
+    ],
   },
 
   blank: {
     name: "Blank Contract",
-    description: "Start from scratch",
-    code: `pragma language_version >= 0.14.0;
+    description: "Start from scratch with an empty scaffold",
+    files: [
+      {
+        name: "main.compact",
+        language: "compact",
+        content: `pragma language_version >= 0.14.0;
 
 import CompactStandardLibrary;
 
 contract MyContract {
-  
+
   // Define your ledger state here
   // ledger myValue: Uint<32>;
 
@@ -195,13 +276,39 @@ contract MyContract {
   // }
 }
 `,
+      },
+    ],
   },
 };
 
-export const SAMPLE_PROJECTS = [
-  { id: "proj_1", name: "Counter Demo", template: "counter", updatedAt: Date.now() - 1000 * 60 * 30 },
-  { id: "proj_2", name: "Private Voting", template: "voting", updatedAt: Date.now() - 1000 * 60 * 60 * 2 },
-  { id: "proj_3", name: "Confidential Token", template: "token", updatedAt: Date.now() - 1000 * 60 * 60 * 24 },
+export const SAMPLE_PROJECTS: Array<{
+  id: string;
+  name: string;
+  description: string;
+  template: TemplateKey;
+  updatedAt: number;
+}> = [
+  {
+    id: "proj_1",
+    name: "Counter Demo",
+    description: "A simple counter demonstrating Compact's ledger and circuit primitives.",
+    template: "counter",
+    updatedAt: Date.now() - 1000 * 60 * 30,
+  },
+  {
+    id: "proj_2",
+    name: "Private Voting",
+    description: "Zero-knowledge voting system where ballots remain shielded.",
+    template: "voting",
+    updatedAt: Date.now() - 1000 * 60 * 60 * 2,
+  },
+  {
+    id: "proj_3",
+    name: "Confidential Token",
+    description: "ERC-20 style token with hidden balances using commitment schemes.",
+    template: "token",
+    updatedAt: Date.now() - 1000 * 60 * 60 * 24,
+  },
 ];
 
 export const MOCK_WALLET = {
