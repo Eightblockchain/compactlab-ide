@@ -4,6 +4,8 @@
  * Used by Sidebar and EditorTabBar.
  */
 
+import Image from "next/image";
+
 // ─── Midnight / Compact icon ───────────────────────────────────────────────────
 // Uses the official Midnight logo from /public/logo-compact-dark.svg.
 // The source SVG is near-black (#0A0A0A); we apply a CSS filter to render it
@@ -11,8 +13,7 @@
 
 export function MidnightIcon({ size = 14 }: { size?: number }) {
   return (
-    // filter: invert → white, then sepia+saturate+hue-rotate → #A78AE0 purple
-    <img
+    <Image
       src="/logo-compact-dark.svg"
       width={size}
       height={size}
@@ -20,7 +21,6 @@ export function MidnightIcon({ size = 14 }: { size?: number }) {
       style={{
         filter:
           "invert(1) sepia(1) saturate(3) hue-rotate(220deg) brightness(0.85)",
-        display: "inline-block",
         flexShrink: 0,
       }}
     />
