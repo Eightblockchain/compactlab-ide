@@ -642,7 +642,7 @@ export const useIDEStore = create<IDEStore>()(
         set({ isNewProjectModalOpen: open, newProjectModalTemplate: template }),
     }),
     {
-      name: "compactlab-v2",
+      name: "compactlab-v3",
       partialize: (state) => ({
         projects: state.projects,
         activeProjectId: state.activeProjectId,
