@@ -26,3 +26,15 @@ export function sleep(ms: number): Promise<void> {
 export function generateId(): string {
   return Math.random().toString(36).slice(2, 11);
 }
+
+export function slugify(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9\s-]/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .replace(/^-|-$/g, "") || "project"
+  );
+}

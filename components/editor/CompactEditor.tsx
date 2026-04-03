@@ -14,6 +14,7 @@ export function CompactEditor() {
     code,
     setCode,
     saveProject,
+    activeFile,
     status,
     addLog,
     setCompileResult,
@@ -139,8 +140,8 @@ export function CompactEditor() {
 
         <Editor
           height="100%"
-          language="compact"
-          theme="compactlab-dark"
+          language={activeFile?.language ?? "compact"}
+          theme={activeFile?.language === "compact" ? "compactlab-dark" : "vs-dark"}
           value={code}
           beforeMount={handleBeforeMount}
           onChange={handleChange}

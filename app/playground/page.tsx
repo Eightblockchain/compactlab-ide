@@ -12,6 +12,7 @@ import { Sidebar } from "@/components/layout/Sidebar";
 import { CompactEditor } from "@/components/editor/CompactEditor";
 import { InspectorPanel } from "@/components/panels/InspectorPanel";
 import { BottomPanel } from "@/components/panels/BottomPanel";
+import { NewProjectModal } from "@/components/modals/NewProjectModal";
 
 export default function PlaygroundPage() {
   const { activeProjectId, projects, loadProject, sidebarOpen, bottomPanelOpen } = useIDEStore();
@@ -119,6 +120,9 @@ export default function PlaygroundPage() {
       </div>
 
       {!bottomPanelOpen && <CollapsedBottomBar />}
+
+      {/* Global modal layer */}
+      <NewProjectModal />
     </div>
   );
 }
