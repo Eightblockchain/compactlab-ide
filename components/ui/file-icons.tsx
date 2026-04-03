@@ -5,27 +5,25 @@
  */
 
 // ─── Midnight / Compact icon ───────────────────────────────────────────────────
+// Uses the official Midnight logo from /public/logo-compact-dark.svg.
+// The source SVG is near-black (#0A0A0A); we apply a CSS filter to render it
+// in the brand purple on dark backgrounds.
 
 export function MidnightIcon({ size = 14 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
-      {/* Moon crescent */}
-      <path
-        d="M13 8.5A5.5 5.5 0 0 1 7.5 14 5.5 5.5 0 0 1 2 8.5 5.5 5.5 0 0 1 7.5 3a4 4 0 0 0 0 8 4 4 0 0 0 5.5-2.5z"
-        fill="#7C5CBF"
-      />
-      {/* ZK shield */}
-      <path
-        d="M9.5 4.5L12 5.5v2.5c0 1-.83 1.83-2.5 2.5C7.83 9.83 7 9 7 8V5.5l2.5-1z"
-        fill="#A78AE0"
-        opacity="0.9"
-      />
-      <path
-        d="M9.5 6.2l1.2.5v1.2c0 .5-.4.9-1.2 1.3-.8-.4-1.2-.8-1.2-1.3V6.7l1.2-.5z"
-        fill="#fff"
-        opacity="0.85"
-      />
-    </svg>
+    // filter: invert → white, then sepia+saturate+hue-rotate → #A78AE0 purple
+    <img
+      src="/logo-compact-dark.svg"
+      width={size}
+      height={size}
+      alt="Compact"
+      style={{
+        filter:
+          "invert(1) sepia(1) saturate(3) hue-rotate(220deg) brightness(0.85)",
+        display: "inline-block",
+        flexShrink: 0,
+      }}
+    />
   );
 }
 
