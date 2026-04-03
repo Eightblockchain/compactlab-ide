@@ -7,6 +7,7 @@ import { Divider, IconButton } from "@/components/ui";
 import { FileIcon, FolderIcon, MidnightIcon, getFolderColor } from "@/components/ui/file-icons";
 import { cn } from "@/lib/utils";
 import { COMPACT_TEMPLATES } from "@/lib/constants";
+import { APP_VERSION } from "@/lib/version";
 
 const _MODULE_NOW = Date.now();
 
@@ -23,14 +24,13 @@ function formatRelativeTime(ts: number): string {
 
 // ─── Template tag ──────────────────────────────────────────────────────────────
 
-function TemplateTag({ id }: { id: string }) {
-  const tags: Record<string, { label: string; color: string }> = {
-    counter: { label: "Beginner", color: "text-success bg-success/10" },
-    voting: { label: "ZK Proof", color: "text-info bg-info/10" },
-    token: { label: "DeFi", color: "text-warning bg-warning/10" },
-    blank: { label: "Empty", color: "text-text-muted bg-white/5" },
+function TemplateTag({ difficulty }: { difficulty: string }) {
+  const map: Record<string, { label: string; color: string }> = {
+    beginner: { label: "Beginner", color: "text-success bg-success/10" },
+    intermediate: { label: "Intermediate", color: "text-warning bg-warning/10" },
+    advanced: { label: "Advanced", color: "text-error bg-error/10" },
   };
-  const tag = tags[id] ?? { label: id, color: "text-text-muted bg-white/5" };
+  const tag = map[difficulty] ?? { label: difficulty, color: "text-text-muted bg-white/5" };
   return (
     <span className={cn("text-2xs font-medium px-1.5 py-0.5 rounded-sm", tag.color)}>
       {tag.label}
@@ -533,6 +533,7 @@ export function Sidebar() {
     addFolder,
     deleteFolder,
     setNewProjectModalOpen,
+    createProject,
   } = useIDEStore();
 
   function isExpanded(id: string): boolean {
@@ -569,11 +570,14 @@ export function Sidebar() {
     addFolder(name, parentId);
   }
 
-  const templates = Object.entries(COMPACT_TEMPLATES).map(([id, t]) => ({
-    id,
-    name: t.name,
-    description: t.description,
-  }));
+  const templates = Object.entries(COMPACT_TEMPLATES)
+    .filter(([id]) => id !== "blank")
+    .map(([id, t]) => ({
+      id,
+      name: t.name,
+      description: t.description,
+      difficulty: t.difficulty,
+    }));
 
   return (
     <aside className="flex flex-col bg-surface border-r border-border h-full w-full overflow-hidden">
@@ -654,7 +658,7 @@ export function Sidebar() {
             {templates.map((tpl) => (
               <button
                 key={tpl.id}
-                onClick={() => { setNewProjectModalOpen(true, tpl.id); setTab("projects"); }}
+                onClick={() => { createProject(tpl.name, tpl.id, tpl.description); setTab("projects"); }}
                 className={cn(
                   "w-full text-left p-3 rounded-md border transition-all group",
                   "border-border bg-surface-2 hover:border-border-strong hover:bg-white/3",
@@ -668,7 +672,7 @@ export function Sidebar() {
                   <MidnightIcon size={18} />
                 </div>
                 <div className="mt-2">
-                  <TemplateTag id={tpl.id} />
+                  <TemplateTag difficulty={tpl.difficulty} />
                 </div>
               </button>
             ))}
@@ -681,7 +685,7 @@ export function Sidebar() {
         <div className="flex items-center gap-1.5">
           <div className="w-1.5 h-1.5 rounded-full bg-success" />
           <span className="text-xs text-text-muted">Midnight Devnet</span>
-          <span className="ml-auto text-xs text-text-dim">v0.21.0</span>
+          <span className="ml-auto text-xs text-text-dim" title="CompactLab version">v{APP_VERSION}</span>
         </div>
       </div>
     </aside>

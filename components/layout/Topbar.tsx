@@ -190,7 +190,7 @@ export function Topbar() {
           <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
             <path d="M2 2.5L10 6L2 9.5V2.5z" />
           </svg>
-          Run
+          Compile
         </Button>
 
         <Button
