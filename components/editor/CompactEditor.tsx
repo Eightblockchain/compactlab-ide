@@ -5,6 +5,7 @@ import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
 import { useIDEStore } from "@/store/ide";
 import { mockCompile } from "@/lib/compact";
 import { registerCompactLanguage } from "./compact-language";
+import { EditorTabBar } from "./EditorTabBar";
 
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -93,40 +94,7 @@ export function CompactEditor() {
 
   return (
     <div className="flex flex-col h-full w-full" style={{ background: "#111111" }}>
-      {/* Tab bar — shell chrome (darker) frames the editor below */}
-      <div
-        className="flex items-center flex-shrink-0 border-b border-border"
-        style={{ background: "#0d0d0d", minHeight: 35 }}
-      >
-        {/* Active file tab — floats up to editor bg level */}
-        <div
-          className="flex items-center gap-2 px-4 h-full border-r border-border"
-          style={{
-            background: "#111111",
-            borderTop: "2px solid #F06358",
-            paddingTop: 2,
-            paddingBottom: 0,
-          }}
-        >
-          <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 12 12" fill="none" stroke="#E8AA5B" strokeWidth="1.2">
-            <path d="M7 1H3a1 1 0 00-1 1v8a1 1 0 001 1h6a1 1 0 001-1V4L7 1z" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M7 1v3h3" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <span className="text-xs font-medium" style={{ color: "#eeeeee" }}>contract.compact</span>
-        </div>
-
-        <div className="flex-1" />
-
-        {/* Status hints */}
-        <div className="flex items-center gap-3 px-4 text-2xs font-mono" style={{ color: "#636360" }}>
-          <span>Compact v0.14</span>
-          <span style={{ color: "#3d3d3a" }}>│</span>
-          <span>Midnight Devnet</span>
-          <span style={{ color: "#3d3d3a" }}>│</span>
-          <span><kbd className="font-sans">⌘S</kbd> Save</span>
-          <span><kbd className="font-sans">⌘↵</kbd> Run</span>
-        </div>
-      </div>
+      <EditorTabBar />
 
       {/* Monaco editor */}
       <div className="flex-1 overflow-hidden">

@@ -10,11 +10,18 @@ export type LogTab = "logs" | "compile" | "network";
 
 // ─── Domain types ──────────────────────────────────────────────────────────────
 
+export interface ProjectFolder {
+  id: string;
+  name: string;
+  createdAt: number;
+}
+
 export interface ProjectFile {
   id: string;
   name: string;
   language: "compact" | "markdown" | "json";
   content: string;
+  folderId?: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -25,6 +32,7 @@ export interface Project {
   slug: string;
   description: string;
   template: string;
+  folders: ProjectFolder[];
   files: ProjectFile[];
   activeFileId: string;
   createdAt: number;
@@ -78,12 +86,22 @@ export interface IDEStore {
   isNewProjectModalOpen: boolean;
   newProjectModalTemplate: string;
 
+  // Open editor tabs (file IDs, current project)
+  openTabIds: string[];
+  // In-memory buffers for unsaved content per file (not persisted)
+  tabBuffers: Record<string, string>;
+
   // Actions — projects
   createProject: (name: string, template?: string, description?: string) => Project;
   loadProject: (id: string) => void;
   setActiveFile: (fileId: string) => void;
-  addFile: (name: string, language?: ProjectFile["language"]) => ProjectFile | null;
+  openTab: (fileId: string) => void;
+  closeTab: (fileId: string) => void;
+  addFile: (name: string, language?: ProjectFile["language"], folderId?: string | null) => ProjectFile | null;
   deleteFile: (fileId: string) => void;
+  addFolder: (name: string) => ProjectFolder | null;
+  deleteFolder: (folderId: string) => void;
+  renameFolder: (folderId: string, name: string) => void;
   setCode: (code: string) => void;
   saveProject: () => void;
   deleteProject: (id: string) => void;
@@ -140,6 +158,7 @@ function buildProject(
     slug: slugify(name),
     description,
     template,
+    folders: [],
     files,
     activeFileId: files[0]?.id ?? "",
     createdAt,
@@ -206,6 +225,9 @@ export const useIDEStore = create<IDEStore>()(
       isNewProjectModalOpen: false,
       newProjectModalTemplate: "blank",
 
+      openTabIds: firstFile ? [firstFile.id] : [],
+      tabBuffers: {},
+
       // ── Project actions ────────────────────────────────────────────────────
 
       createProject: (name, template = "blank", description = "") => {
@@ -235,6 +257,8 @@ export const useIDEStore = create<IDEStore>()(
           simulateResult: null,
           deployResult: null,
           isNewProjectModalOpen: false,
+          openTabIds: file ? [file.id] : [],
+          tabBuffers: {},
         }));
         return project;
       },
@@ -258,50 +282,164 @@ export const useIDEStore = create<IDEStore>()(
           simulateResult: null,
           deployResult: null,
           logs: [],
+          openTabIds: file ? [file.id] : [],
+          tabBuffers: {},
         });
       },
 
       setActiveFile: (fileId) => {
-        const { activeProject, activeProjectId, activeFileId, code, projects } =
-          get();
-        if (!activeProject || fileId === activeFileId) return;
+        get().openTab(fileId);
+      },
 
-        // Flush current code into the current file before switching
-        let base = activeProject;
-        if (activeFileId) {
-          base = {
-            ...activeProject,
-            files: activeProject.files.map((f) =>
-              f.id === activeFileId
-                ? { ...f, content: code, updatedAt: Date.now() }
-                : f
-            ),
-          };
-        }
+      openTab: (fileId) => {
+        const { activeProject, activeProjectId, activeFileId, code, openTabIds, tabBuffers, projects } = get();
+        if (!activeProject) return;
+        // Already on this file and it's open — nothing to do
+        if (fileId === activeFileId && openTabIds.includes(fileId)) return;
 
-        const file = base.files.find((f) => f.id === fileId);
+        const file = activeProject.files.find((f) => f.id === fileId);
         if (!file) return;
 
-        const updated = { ...base, activeFileId: fileId };
+        // 1. Flush current code into buffer and into the file
+        const newBuffers: Record<string, string> = { ...tabBuffers };
+        let updatedProject = activeProject;
+        if (activeFileId && activeFileId !== fileId) {
+          newBuffers[activeFileId] = code;
+          updatedProject = {
+            ...activeProject,
+            files: activeProject.files.map((f) =>
+              f.id === activeFileId ? { ...f, content: code, updatedAt: Date.now() } : f
+            ),
+            activeFileId: fileId,
+          };
+        } else {
+          updatedProject = { ...activeProject, activeFileId: fileId };
+        }
+
+        // 2. Add to tab strip if not already open
+        const newTabs = openTabIds.includes(fileId) ? openTabIds : [...openTabIds, fileId];
+
+        // 3. Load content: prefer buffer, then file content
+        const newCode = newBuffers[fileId] ?? file.content;
+
         set({
-          projects: projects.map((p) =>
-            p.id === activeProjectId ? updated : p
-          ),
-          activeProject: updated,
+          openTabIds: newTabs,
+          tabBuffers: newBuffers,
+          activeProjectId,
+          activeProject: updatedProject,
+          projects: projects.map((p) => p.id === activeProjectId ? updatedProject : p),
           activeFileId: fileId,
-          activeFile: file,
-          code: file.content,
+          activeFile: { ...file, content: newCode },
+          code: newCode,
           isDirty: false,
           saveStatus: "saved",
         });
       },
 
-      addFile: (name, language = "compact") => {
+      closeTab: (fileId) => {
+        const { openTabIds, activeFileId, activeProject, activeProjectId, projects, tabBuffers, code } = get();
+        const newTabs = openTabIds.filter((id) => id !== fileId);
+        const newBuffers = { ...tabBuffers };
+        delete newBuffers[fileId];
+
+        if (fileId !== activeFileId) {
+          // Closing an inactive tab — just remove it
+          set({ openTabIds: newTabs, tabBuffers: newBuffers });
+          return;
+        }
+
+        // Closing the active tab — find the best adjacent tab to activate
+        const idx = openTabIds.indexOf(fileId);
+        // Prefer the tab to the left, then right
+        const nextId = newTabs[idx - 1] ?? newTabs[idx] ?? null;
+
+        if (!nextId || !activeProject) {
+          set({ openTabIds: newTabs, tabBuffers: newBuffers, activeFileId: null, activeFile: null, code: "" });
+          return;
+        }
+
+        const nextFile = activeProject.files.find((f) => f.id === nextId) ?? null;
+        const nextCode = newBuffers[nextId] ?? nextFile?.content ?? "";
+
+        // Also flush current code to the file being closed before leaving
+        let updatedProject = activeProject;
+        if (activeFileId) {
+          updatedProject = {
+            ...activeProject,
+            files: activeProject.files.map((f) =>
+              f.id === activeFileId ? { ...f, content: code, updatedAt: Date.now() } : f
+            ),
+            activeFileId: nextId,
+          };
+        }
+
+        set({
+          openTabIds: newTabs,
+          tabBuffers: newBuffers,
+          activeProject: updatedProject,
+          projects: projects.map((p) => p.id === activeProjectId ? updatedProject : p),
+          activeFileId: nextId,
+          activeFile: nextFile,
+          code: nextCode,
+          isDirty: false,
+          saveStatus: "saved",
+        });
+      },
+
+      addFolder: (name) => {
         const { activeProjectId, activeProject, projects } = get();
+        if (!activeProjectId || !activeProject) return null;
+        const folder: ProjectFolder = { id: generateId(), name, createdAt: Date.now() };
+        const updated: Project = {
+          ...activeProject,
+          folders: [...activeProject.folders, folder],
+          updatedAt: Date.now(),
+        };
+        set({
+          projects: projects.map((p) => p.id === activeProjectId ? updated : p),
+          activeProject: updated,
+        });
+        return folder;
+      },
+
+      deleteFolder: (folderId) => {
+        const { activeProjectId, activeProject, projects } = get();
+        if (!activeProjectId || !activeProject) return;
+        // Move folder's files to root
+        const updated: Project = {
+          ...activeProject,
+          folders: activeProject.folders.filter((f) => f.id !== folderId),
+          files: activeProject.files.map((f) =>
+            f.folderId === folderId ? { ...f, folderId: null } : f
+          ),
+          updatedAt: Date.now(),
+        };
+        set({
+          projects: projects.map((p) => p.id === activeProjectId ? updated : p),
+          activeProject: updated,
+        });
+      },
+
+      renameFolder: (folderId, name) => {
+        const { activeProjectId, activeProject, projects } = get();
+        if (!activeProjectId || !activeProject) return;
+        const updated: Project = {
+          ...activeProject,
+          folders: activeProject.folders.map((f) => f.id === folderId ? { ...f, name } : f),
+          updatedAt: Date.now(),
+        };
+        set({
+          projects: projects.map((p) => p.id === activeProjectId ? updated : p),
+          activeProject: updated,
+        });
+      },
+
+      addFile: (name, language = "compact", folderId = null) => {
+        const { activeProjectId, activeProject, projects, openTabIds, tabBuffers, activeFileId, code } = get();
         if (!activeProjectId || !activeProject) return null;
 
         const defaultContent: Record<ProjectFile["language"], string> = {
-          compact: `// ${name}\n\n// Add your types and circuits here\n`,
+          compact: `// ${name}\n\n// Add your circuits here\n`,
           markdown: `# ${name.replace(/\.md$/, "")}\n`,
           json: `{\n}\n`,
         };
@@ -311,9 +449,15 @@ export const useIDEStore = create<IDEStore>()(
           name,
           language,
           content: defaultContent[language],
+          folderId: folderId ?? null,
           createdAt: Date.now(),
           updatedAt: Date.now(),
         };
+
+        // Flush current content to buffer before switching
+        const newBuffers = activeFileId
+          ? { ...tabBuffers, [activeFileId]: code }
+          : { ...tabBuffers };
 
         const updated: Project = {
           ...activeProject,
@@ -323,30 +467,38 @@ export const useIDEStore = create<IDEStore>()(
         };
 
         set({
-          projects: projects.map((p) =>
-            p.id === activeProjectId ? updated : p
-          ),
+          projects: projects.map((p) => p.id === activeProjectId ? updated : p),
           activeProject: updated,
           activeFileId: file.id,
           activeFile: file,
           code: file.content,
+          openTabIds: [...openTabIds, file.id],
+          tabBuffers: newBuffers,
+          isDirty: false,
+          saveStatus: "saved",
         });
 
         return file;
       },
 
       deleteFile: (fileId) => {
-        const { activeProjectId, activeProject, activeFileId, projects } = get();
+        const { activeProjectId, activeProject, activeFileId, projects, openTabIds, tabBuffers } = get();
         if (!activeProjectId || !activeProject) return;
         if (activeProject.files.length <= 1) return;
 
         const updatedFiles = activeProject.files.filter((f) => f.id !== fileId);
         const isActive = fileId === activeFileId;
-        const newActiveFileId = isActive
-          ? (updatedFiles[0]?.id ?? "")
-          : (activeFileId ?? "");
-        const newActiveFile =
-          updatedFiles.find((f) => f.id === newActiveFileId) ?? updatedFiles[0];
+
+        // Remove from tabs
+        const newTabs = openTabIds.filter((id) => id !== fileId);
+        const newBuffers = { ...tabBuffers };
+        delete newBuffers[fileId];
+
+        // If deleted file was active, activate adjacent in tab strip
+        const tabIdx = openTabIds.indexOf(fileId);
+        const nextTabId = newTabs[tabIdx - 1] ?? newTabs[tabIdx] ?? updatedFiles[0]?.id ?? "";
+        const newActiveFileId = isActive ? nextTabId : (activeFileId ?? "");
+        const newActiveFile = updatedFiles.find((f) => f.id === newActiveFileId) ?? updatedFiles[0];
 
         const updated: Project = {
           ...activeProject,
@@ -356,18 +508,26 @@ export const useIDEStore = create<IDEStore>()(
         };
 
         set({
-          projects: projects.map((p) =>
-            p.id === activeProjectId ? updated : p
-          ),
+          projects: projects.map((p) => p.id === activeProjectId ? updated : p),
           activeProject: updated,
           activeFileId: newActiveFileId,
           activeFile: newActiveFile ?? null,
-          ...(isActive ? { code: newActiveFile?.content ?? "" } : {}),
+          openTabIds: newTabs.length > 0 ? newTabs : (newActiveFile ? [newActiveFile.id] : []),
+          tabBuffers: newBuffers,
+          ...(isActive ? { code: newBuffers[newActiveFileId] ?? newActiveFile?.content ?? "", isDirty: false, saveStatus: "saved" } : {}),
         });
       },
 
       setCode: (code) => {
-        set({ code, isDirty: true, saveStatus: "unsaved" });
+        set((s) => ({
+          code,
+          isDirty: true,
+          saveStatus: "unsaved",
+          // Keep buffer in sync so tab-switching restores unsaved content
+          tabBuffers: s.activeFileId
+            ? { ...s.tabBuffers, [s.activeFileId]: code }
+            : s.tabBuffers,
+        }));
       },
 
       saveProject: () => {
@@ -477,6 +637,7 @@ export const useIDEStore = create<IDEStore>()(
       partialize: (state) => ({
         projects: state.projects,
         activeProjectId: state.activeProjectId,
+        openTabIds: state.openTabIds,
         sidebarOpen: state.sidebarOpen,
         bottomPanelOpen: state.bottomPanelOpen,
         rightPanelTab: state.rightPanelTab,
@@ -495,6 +656,11 @@ export const useIDEStore = create<IDEStore>()(
           state.activeFileId = file?.id ?? null;
           state.activeFile = file ?? null;
           state.code = file?.content ?? "";
+          // Validate persisted tab IDs still exist in the project
+          const validFileIds = new Set(proj.files?.map((f) => f.id) ?? []);
+          const restoredTabs = (state.openTabIds ?? []).filter((id) => validFileIds.has(id));
+          state.openTabIds = restoredTabs.length > 0 ? restoredTabs : (file ? [file.id] : []);
+          state.tabBuffers = {};
         }
       },
     }
