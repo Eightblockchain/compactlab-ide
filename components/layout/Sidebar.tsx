@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useIDEStore } from "@/store/ide";
 import type { Project, ProjectFile, ProjectFolder } from "@/store/ide";
 import { Divider, IconButton } from "@/components/ui";
+import { FileIcon, FolderIcon, MidnightIcon, getFolderColor } from "@/components/ui/file-icons";
 import { cn } from "@/lib/utils";
 import { COMPACT_TEMPLATES } from "@/lib/constants";
 
@@ -18,41 +19,6 @@ function formatRelativeTime(ts: number): string {
   if (hours > 0) return `${hours}h ago`;
   if (mins > 0) return `${mins}m ago`;
   return "just now";
-}
-
-// ─── File icons ────────────────────────────────────────────────────────────────
-
-function CompactIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 12 12" fill="none" className={cn("w-3 h-3", className)} stroke="currentColor" strokeWidth="1.2">
-      <path d="M6 1L2 3v4l4 2 4-2V3L6 1z" strokeLinejoin="round" />
-      <circle cx="6" cy="6" r="1" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
-
-function MarkdownIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 12 12" fill="none" className={cn("w-3 h-3", className)} stroke="currentColor" strokeWidth="1.2">
-      <path d="M1 2h10v8H1z" strokeLinejoin="round" />
-      <path d="M3 8V5l2 2 2-2v3M9 8V5l-1 2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function JsonIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 12 12" fill="none" className={cn("w-3 h-3", className)} stroke="currentColor" strokeWidth="1.2">
-      <path d="M2 3.5C2 2.7 2.7 2 3.5 2S5 2.7 5 3.5v5C5 9.3 4.3 10 3.5 10" strokeLinecap="round" />
-      <path d="M10 3.5C10 2.7 9.3 2 8.5 2S7 2.7 7 3.5v5c0 .8.7 1.5 1.5 1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function FileTypeIcon({ language, className }: { language: ProjectFile["language"]; className?: string }) {
-  if (language === "compact") return <CompactIcon className={className} />;
-  if (language === "markdown") return <MarkdownIcon className={className} />;
-  return <JsonIcon className={className} />;
 }
 
 // ─── Template tag ──────────────────────────────────────────────────────────────
@@ -80,21 +46,15 @@ function detectLanguage(name: string): ProjectFile["language"] {
   return "compact";
 }
 
-function AddFileForm({
-  onAdd,
-  onCancel,
-}: {
-  onAdd: (name: string) => void;
-  onCancel: () => void;
-}) {
+function AddFileForm({ onAdd, onCancel }: { onAdd: (name: string) => void; onCancel: () => void }) {
   const [value, setValue] = useState("");
   return (
     <div className="mt-0.5 mb-1 mr-2">
       <div
         className="flex items-center gap-1.5 px-2 py-1.5 rounded-md"
-        style={{ background: "rgba(240,99,88,0.06)", border: "1px solid rgba(240,99,88,0.2)" }}
+        style={{ background: "rgba(240,99,88,0.06)", border: "1px solid rgba(240,99,88,0.18)" }}
       >
-        <FileTypeIcon language={detectLanguage(value)} className="text-text-muted flex-shrink-0" />
+        <FileIcon filename={value || "untitled.compact"} size={13} />
         <input
           value={value}
           onChange={(e) => setValue(e.target.value)}
@@ -119,29 +79,15 @@ function AddFileForm({
   );
 }
 
-function AddFolderForm({
-  onAdd,
-  onCancel,
-}: {
-  onAdd: (name: string) => void;
-  onCancel: () => void;
-}) {
+function AddFolderForm({ onAdd, onCancel }: { onAdd: (name: string) => void; onCancel: () => void }) {
   const [value, setValue] = useState("");
   return (
     <div className="mt-0.5 mb-1 mr-2">
       <div
         className="flex items-center gap-1.5 px-2 py-1.5 rounded-md"
-        style={{ background: "rgba(96,165,250,0.06)", border: "1px solid rgba(96,165,250,0.2)" }}
+        style={{ background: "rgba(220,182,122,0.08)", border: "1px solid rgba(220,182,122,0.25)" }}
       >
-        <svg
-          viewBox="0 0 12 12"
-          fill="none"
-          className="w-3 h-3 flex-shrink-0 text-info"
-          stroke="currentColor"
-          strokeWidth="1.2"
-        >
-          <path d="M1 4h4l1 1h5v5H1V4z" strokeLinejoin="round" />
-        </svg>
+        <FolderIcon open size={14} color={getFolderColor(value || "")} />
         <input
           value={value}
           onChange={(e) => setValue(e.target.value)}
@@ -155,7 +101,7 @@ function AddFolderForm({
         />
         <button
           onClick={() => value.trim() && onAdd(value.trim())}
-          className="text-info hover:opacity-80 transition-opacity flex-shrink-0"
+          className="text-[#DCB67A] hover:opacity-80 transition-opacity flex-shrink-0"
         >
           <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-3 h-3">
             <path d="M5 1v8M1 5h8" strokeLinecap="round" />
@@ -167,7 +113,6 @@ function AddFolderForm({
 }
 
 // ─── File row ──────────────────────────────────────────────────────────────────
-// depth controls left padding: 0 => 28px, each level +16px
 
 function FileRow({
   file,
@@ -185,25 +130,22 @@ function FileRow({
   onDelete: () => void;
 }) {
   const pl = 28 + depth * 16;
-  const iconColor: Record<ProjectFile["language"], string> = {
-    compact: isActive ? "text-accent" : "text-text-muted",
-    markdown: isActive ? "text-info" : "text-text-muted",
-    json: isActive ? "text-warning" : "text-text-muted",
-  };
   return (
     <div
       onClick={onClick}
       className={cn(
         "group flex items-center gap-1.5 pr-2 py-1.5 rounded-md cursor-pointer transition-colors",
-        isActive ? "bg-accent/8" : "hover:bg-white/3",
+        isActive ? "bg-white/5" : "hover:bg-white/3",
       )}
       style={{ paddingLeft: pl }}
     >
-      <FileTypeIcon language={file.language} className={iconColor[file.language]} />
+      <span className="flex-shrink-0 opacity-90">
+        <FileIcon filename={file.name} size={14} />
+      </span>
       <span
         className={cn(
           "text-xs flex-1 truncate",
-          isActive ? "text-accent" : "text-text-secondary group-hover:text-text-primary",
+          isActive ? "text-text-primary font-medium" : "text-text-secondary group-hover:text-text-primary",
         )}
       >
         {file.name}
@@ -227,8 +169,6 @@ function FileRow({
 }
 
 // ─── Recursive folder node ─────────────────────────────────────────────────────
-// Renders a folder, its files, and sub-folders recursively.
-// depth 0 = directly inside a project, depth 1 = sub-folder, etc.
 
 function FolderNode({
   folder,
@@ -263,9 +203,9 @@ function FolderNode({
   const directFiles = allFiles.filter((f) => f.folderId === folder.id);
   const subFolders = allFolders.filter((f) => f.parentId === folder.id);
 
-  // Indentation: depth 0 -> paddingLeft 24px, each extra level +16px
   const folderPl = 24 + depth * 16;
-  const contentPl = folderPl + 16; // forms+files inside this folder
+  const contentPl = folderPl + 16;
+  const folderColor = getFolderColor(folder.name);
 
   function openAndAdd(kind: "file" | "subfolder") {
     setCollapsed(false);
@@ -274,47 +214,36 @@ function FolderNode({
 
   return (
     <div>
-      {/* Folder header row */}
+      {/* Folder header */}
       <div
-        className="group flex items-center gap-1 pr-2 py-1 rounded-md hover:bg-white/3 cursor-pointer transition-colors"
+        className="group flex items-center gap-1.5 pr-2 py-1 rounded-md hover:bg-white/3 cursor-pointer transition-colors"
         style={{ paddingLeft: folderPl }}
         onClick={() => setCollapsed((c) => !c)}
       >
         {/* Chevron */}
         <svg
-          viewBox="0 0 8 8"
+          viewBox="0 0 6 6"
           fill="currentColor"
           className={cn(
-            "w-2 h-2 flex-shrink-0 text-text-dim transition-transform duration-150",
+            "w-1.5 h-1.5 flex-shrink-0 text-text-dim transition-transform duration-150",
             !collapsed ? "rotate-90" : "",
           )}
         >
-          <path d="M2 1l4 3-4 3V1z" />
+          <path d="M1 0.5l4 2.5-4 2.5V0.5z" />
         </svg>
 
-        {/* Folder icon */}
-        <svg
-          viewBox="0 0 12 12"
-          fill="none"
-          className="w-3 h-3 flex-shrink-0 text-text-muted"
-          stroke="currentColor"
-          strokeWidth="1.2"
-        >
-          {!collapsed ? (
-            <path d="M1 3.5h4l1 1h5v5.5H1V3.5z" strokeLinejoin="round" />
-          ) : (
-            <path d="M1 4h4l1 1h5v5H1V4z" strokeLinejoin="round" />
-          )}
-        </svg>
+        {/* Material folder icon */}
+        <span className="flex-shrink-0">
+          <FolderIcon open={!collapsed} size={15} color={folderColor} />
+        </span>
 
-        <span className="text-xs text-text-secondary flex-1 truncate">{folder.name}</span>
+        <span className="text-xs text-text-secondary flex-1 truncate min-w-0">{folder.name}</span>
 
         {/* Hover actions */}
         <div
           className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
           onClick={(e) => e.stopPropagation()}
         >
-          {/* New file */}
           <button
             onClick={() => openAndAdd("file")}
             className="w-4 h-4 flex items-center justify-center rounded text-text-dim hover:text-text-secondary hover:bg-white/6 transition-colors"
@@ -324,20 +253,16 @@ function FolderNode({
               <path d="M5 1v8M1 5h8" strokeLinecap="round" />
             </svg>
           </button>
-
-          {/* New sub-folder */}
           <button
             onClick={() => openAndAdd("subfolder")}
-            className="w-4 h-4 flex items-center justify-center rounded text-text-dim hover:text-info hover:bg-info/10 transition-colors"
+            className="w-4 h-4 flex items-center justify-center rounded text-text-dim hover:text-[#DCB67A] hover:bg-[#DCB67A]/10 transition-colors"
             title="New sub-folder"
           >
-            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.2" className="w-3 h-3">
-              <path d="M1 4h4l1 1h5v5H1V4z" strokeLinejoin="round" />
-              <path d="M6 7v2M5 8h2" strokeLinecap="round" />
+            <svg viewBox="0 0 12 10" fill="none" stroke="currentColor" strokeWidth="1.2" className="w-3 h-2.5">
+              <path d="M1 2h3.5l1 1H11v6H1V2z" strokeLinejoin="round" />
+              <path d="M6 5.5v2M5 6.5h2" strokeLinecap="round" />
             </svg>
           </button>
-
-          {/* Delete folder */}
           <button
             onClick={() => onDeleteFolder(folder.id)}
             className="w-4 h-4 flex items-center justify-center rounded text-text-dim hover:text-error hover:bg-error/10 transition-colors"
@@ -353,7 +278,6 @@ function FolderNode({
       {/* Contents */}
       {!collapsed && (
         <div>
-          {/* Direct files */}
           {directFiles.map((file) => (
             <FileRow
               key={file.id}
@@ -365,8 +289,6 @@ function FolderNode({
               onDelete={() => onDeleteFile(file.id)}
             />
           ))}
-
-          {/* Sub-folders (recursive) */}
           {subFolders.map((sub) => (
             <FolderNode
               key={sub.id}
@@ -384,15 +306,10 @@ function FolderNode({
               onAddSubfolder={onAddSubfolder}
             />
           ))}
-
-          {/* Inline forms */}
           {nodeAdding === "file" && (
             <div style={{ paddingLeft: contentPl }}>
               <AddFileForm
-                onAdd={(name) => {
-                  onAddFile(name, folder.id);
-                  setNodeAdding("none");
-                }}
+                onAdd={(name) => { onAddFile(name, folder.id); setNodeAdding("none"); }}
                 onCancel={() => setNodeAdding("none")}
               />
             </div>
@@ -400,10 +317,7 @@ function FolderNode({
           {nodeAdding === "subfolder" && (
             <div style={{ paddingLeft: folderPl }}>
               <AddFolderForm
-                onAdd={(name) => {
-                  onAddSubfolder(name, folder.id);
-                  setNodeAdding("none");
-                }}
+                onAdd={(name) => { onAddSubfolder(name, folder.id); setNodeAdding("none"); }}
                 onCancel={() => setNodeAdding("none")}
               />
             </div>
@@ -449,8 +363,6 @@ function ProjectFolderItem({
 
   const allFolders = project.folders ?? [];
   const allFiles = project.files;
-
-  // Root-level = no parent folder
   const rootFolders = allFolders.filter((f) => !f.parentId);
   const rootFiles = allFiles.filter((f) => !f.folderId);
 
@@ -469,29 +381,17 @@ function ProjectFolderItem({
           className="flex-shrink-0 w-4 h-4 flex items-center justify-center text-text-muted hover:text-text-primary transition-colors"
         >
           <svg
-            viewBox="0 0 8 8"
+            viewBox="0 0 6 6"
             fill="currentColor"
-            className={cn("w-2 h-2 transition-transform duration-150", isExpanded ? "rotate-90" : "")}
+            className={cn("w-1.5 h-1.5 transition-transform duration-150", isExpanded ? "rotate-90" : "")}
           >
-            <path d="M2 1l4 3-4 3V1z" />
+            <path d="M1 0.5l4 2.5-4 2.5V0.5z" />
           </svg>
         </button>
 
-        {/* Folder icon + project name */}
+        {/* Material folder + project name */}
         <div onClick={onLoadProject} className="flex items-center gap-1.5 flex-1 min-w-0">
-          <svg
-            viewBox="0 0 12 12"
-            fill="none"
-            className={cn("w-3.5 h-3.5 flex-shrink-0", isActive ? "text-accent" : "text-text-muted")}
-            stroke="currentColor"
-            strokeWidth="1.2"
-          >
-            {isExpanded ? (
-              <path d="M1 3.5h4l1 1h5v5.5H1V3.5z" strokeLinejoin="round" />
-            ) : (
-              <path d="M1 4h4l1 1h5v5H1V4z" strokeLinejoin="round" />
-            )}
-          </svg>
+          <FolderIcon open={isExpanded} size={16} color={isActive ? "#F06358" : "#DCB67A"} />
           <span
             className={cn(
               "text-sm truncate flex-1 min-w-0",
@@ -510,32 +410,19 @@ function ProjectFolderItem({
 
         {/* Hover actions */}
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
-          {/* New file */}
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setRootAdding({ type: "file" });
-            }}
+            onClick={(e) => { e.stopPropagation(); setRootAdding({ type: "file" }); }}
             className="w-5 h-5 flex items-center justify-center rounded text-text-dim hover:text-text-secondary hover:bg-white/6 transition-colors"
             title="New file"
           >
             <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.3" className="w-2.5 h-2.5">
-              <path
-                d="M5.5 1H2.5a1 1 0 00-1 1v6a1 1 0 001 1h5a1 1 0 001-1V4L5.5 1z"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
+              <path d="M5.5 1H2.5a1 1 0 00-1 1v6a1 1 0 001 1h5a1 1 0 001-1V4L5.5 1z" strokeLinecap="round" strokeLinejoin="round" />
               <path d="M5.5 1v3h3" strokeLinecap="round" strokeLinejoin="round" />
               <path d="M5 4.5v2.5M3.5 6H6.5" strokeLinecap="round" />
             </svg>
           </button>
-
-          {/* New folder */}
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setRootAdding({ type: "folder" });
-            }}
+            onClick={(e) => { e.stopPropagation(); setRootAdding({ type: "folder" }); }}
             className="w-5 h-5 flex items-center justify-center rounded text-text-dim hover:text-text-secondary hover:bg-white/6 transition-colors"
             title="New folder"
           >
@@ -544,13 +431,8 @@ function ProjectFolderItem({
               <path d="M5 5v2M4 6h2" strokeLinecap="round" />
             </svg>
           </button>
-
-          {/* Delete project */}
           <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
+            onClick={(e) => { e.stopPropagation(); onDelete(); }}
             className="w-5 h-5 flex items-center justify-center rounded text-text-dim hover:text-error hover:bg-error/10 transition-colors"
             title="Delete project"
           >
@@ -564,7 +446,6 @@ function ProjectFolderItem({
       {/* Expanded tree */}
       {isExpanded && (
         <div className="mb-1">
-          {/* Root-level files */}
           {rootFiles.map((file) => (
             <FileRow
               key={file.id}
@@ -572,15 +453,10 @@ function ProjectFolderItem({
               isActive={isActive && file.id === activeFileId}
               canDelete={allFiles.length > 1}
               depth={0}
-              onClick={() => {
-                if (!isActive) onLoadProject();
-                onSetActiveFile(file.id);
-              }}
+              onClick={() => { if (!isActive) onLoadProject(); onSetActiveFile(file.id); }}
               onDelete={() => onDeleteFile(file.id)}
             />
           ))}
-
-          {/* Root-level folders (each renders recursively) */}
           {rootFolders.map((folder) => (
             <FolderNode
               key={folder.id}
@@ -591,25 +467,17 @@ function ProjectFolderItem({
               activeFileId={activeFileId}
               totalFileCount={allFiles.length}
               depth={0}
-              onFileClick={(fileId) => {
-                if (!isActive) onLoadProject();
-                onSetActiveFile(fileId);
-              }}
+              onFileClick={(fileId) => { if (!isActive) onLoadProject(); onSetActiveFile(fileId); }}
               onDeleteFile={(fileId) => onDeleteFile(fileId)}
               onDeleteFolder={(folderId) => onDeleteFolder(folderId)}
               onAddFile={(name, folderId) => onAddFile(name, folderId)}
               onAddSubfolder={(name, parentId) => onAddFolder(name, parentId)}
             />
           ))}
-
-          {/* Root-level inline forms */}
           {rootAdding.type === "file" && (
             <div className="pl-7">
               <AddFileForm
-                onAdd={(name) => {
-                  onAddFile(name, null);
-                  setRootAdding({ type: "none" });
-                }}
+                onAdd={(name) => { onAddFile(name, null); setRootAdding({ type: "none" }); }}
                 onCancel={() => setRootAdding({ type: "none" })}
               />
             </div>
@@ -617,16 +485,11 @@ function ProjectFolderItem({
           {rootAdding.type === "folder" && (
             <div className="pl-2">
               <AddFolderForm
-                onAdd={(name) => {
-                  onAddFolder(name, null);
-                  setRootAdding({ type: "none" });
-                }}
+                onAdd={(name) => { onAddFolder(name, null); setRootAdding({ type: "none" }); }}
                 onCancel={() => setRootAdding({ type: "none" })}
               />
             </div>
           )}
-
-          {/* Bottom shortcuts (only when no form is open) */}
           {rootAdding.type === "none" && (
             <div className="mx-2 mt-1 flex items-center gap-3">
               <button
@@ -687,28 +550,16 @@ export function Sidebar() {
   function toggleExpand(id: string) {
     if (isExpanded(id)) {
       setClosedByUser((prev) => new Set([...prev, id]));
-      setOpenedByUser((prev) => {
-        const n = new Set(prev);
-        n.delete(id);
-        return n;
-      });
+      setOpenedByUser((prev) => { const n = new Set(prev); n.delete(id); return n; });
     } else {
       setOpenedByUser((prev) => new Set([...prev, id]));
-      setClosedByUser((prev) => {
-        const n = new Set(prev);
-        n.delete(id);
-        return n;
-      });
+      setClosedByUser((prev) => { const n = new Set(prev); n.delete(id); return n; });
     }
   }
 
   function handleLoadProject(id: string) {
     loadProject(id);
-    setClosedByUser((prev) => {
-      const n = new Set(prev);
-      n.delete(id);
-      return n;
-    });
+    setClosedByUser((prev) => { const n = new Set(prev); n.delete(id); return n; });
   }
 
   function handleAddFile(projectId: string, name: string, folderId: string | null) {
@@ -775,22 +626,11 @@ export function Sidebar() {
                   className="w-10 h-10 rounded-xl flex items-center justify-center mx-auto mb-3"
                   style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}
                 >
-                  <svg
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    className="w-5 h-5 text-text-muted"
-                    stroke="currentColor"
-                    strokeWidth="1.2"
-                  >
-                    <path d="M2 4h5l1.5 1.5H14V13H2V4z" strokeLinejoin="round" />
-                  </svg>
+                  <FolderIcon size={22} color="#636360" />
                 </div>
                 <p className="text-sm text-text-muted">No projects yet</p>
                 <p className="text-xs text-text-dim mt-1 mb-3">Create your first Compact contract</p>
-                <button
-                  onClick={() => setNewProjectModalOpen(true, "blank")}
-                  className="text-xs text-accent hover:underline"
-                >
+                <button onClick={() => setNewProjectModalOpen(true, "blank")} className="text-xs text-accent hover:underline">
                   + New project
                 </button>
               </div>
@@ -820,10 +660,7 @@ export function Sidebar() {
             {templates.map((tpl) => (
               <button
                 key={tpl.id}
-                onClick={() => {
-                  setNewProjectModalOpen(true, tpl.id);
-                  setTab("projects");
-                }}
+                onClick={() => { setNewProjectModalOpen(true, tpl.id); setTab("projects"); }}
                 className={cn(
                   "w-full text-left p-3 rounded-md border transition-all group",
                   "border-border bg-surface-2 hover:border-border-strong hover:bg-white/3",
@@ -834,16 +671,7 @@ export function Sidebar() {
                     <p className="text-sm font-medium text-text-primary group-hover:text-white truncate">{tpl.name}</p>
                     <p className="text-xs text-text-muted mt-0.5 leading-relaxed">{tpl.description}</p>
                   </div>
-                  <svg
-                    className="w-4 h-4 text-text-dim group-hover:text-text-muted flex-shrink-0 mt-0.5 transition-colors"
-                    viewBox="0 0 12 12"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.2"
-                  >
-                    <path d="M4 2h4l2 2v6H2V2h2z" strokeLinecap="round" strokeLinejoin="round" />
-                    <path d="M4 2v2h4" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
+                  <MidnightIcon size={18} />
                 </div>
                 <div className="mt-2">
                   <TemplateTag id={tpl.id} />

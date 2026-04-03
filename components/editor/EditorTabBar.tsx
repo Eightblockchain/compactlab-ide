@@ -3,51 +3,8 @@
 import { useRef } from "react";
 import { useIDEStore } from "@/store/ide";
 import type { ProjectFile } from "@/store/ide";
+import { FileIcon } from "@/components/ui/file-icons";
 import { cn } from "@/lib/utils";
-
-// ─── Language icons ────────────────────────────────────────────────────────────
-
-function CompactTabIcon() {
-  return (
-    <svg viewBox="0 0 12 12" fill="none" className="w-3 h-3 flex-shrink-0" stroke="currentColor" strokeWidth="1.2">
-      <path d="M6 1L2 3v4l4 2 4-2V3L6 1z" strokeLinejoin="round" />
-      <circle cx="6" cy="6" r="1" fill="currentColor" stroke="none" />
-    </svg>
-  );
-}
-
-function MarkdownTabIcon() {
-  return (
-    <svg viewBox="0 0 12 12" fill="none" className="w-3 h-3 flex-shrink-0" stroke="currentColor" strokeWidth="1.2">
-      <path d="M1 2h10v8H1z" strokeLinejoin="round" />
-      <path d="M3 8V5l2 2 2-2v3M9 8V5l-1 2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function JsonTabIcon() {
-  return (
-    <svg viewBox="0 0 12 12" fill="none" className="w-3 h-3 flex-shrink-0" stroke="currentColor" strokeWidth="1.2">
-      <path d="M2 3.5C2 2.7 2.7 2 3.5 2S5 2.7 5 3.5v5C5 9.3 4.3 10 3.5 10" strokeLinecap="round" />
-      <path d="M10 3.5C10 2.7 9.3 2 8.5 2S7 2.7 7 3.5v5c0 .8.7 1.5 1.5 1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function FileTabIcon({ language }: { language: ProjectFile["language"] }) {
-  const colors: Record<ProjectFile["language"], string> = {
-    compact: "#F06358",   // brand coral
-    markdown: "#60a5fa",  // info blue
-    json: "#d4a853",      // warning amber
-  };
-  return (
-    <span style={{ color: colors[language] }}>
-      {language === "compact" && <CompactTabIcon />}
-      {language === "markdown" && <MarkdownTabIcon />}
-      {language === "json" && <JsonTabIcon />}
-    </span>
-  );
-}
 
 // ─── Single tab ────────────────────────────────────────────────────────────────
 
@@ -86,7 +43,9 @@ function Tab({
           : { background: "transparent" }
       }
     >
-      <FileTabIcon language={file.language} />
+      <span className="flex-shrink-0">
+        <FileIcon filename={file.name} size={13} />
+      </span>
 
       <span className="text-xs font-medium whitespace-nowrap max-w-[120px] truncate">
         {file.name}
@@ -208,11 +167,27 @@ export function EditorTabBar() {
         {activeFileId && activeProject && (
           <>
             <span style={{ color: "#555552" }}>
-              {activeProject.files.find((f) => f.id === activeFileId)?.language === "compact"
-                ? "Compact v0.14"
-                : activeProject.files.find((f) => f.id === activeFileId)?.language === "markdown"
-                ? "Markdown"
-                : "JSON"}
+              {(() => {
+                const f = activeProject.files.find((f) => f.id === activeFileId);
+                if (!f) return "";
+                const name = f.name.toLowerCase();
+                if (name.endsWith(".compact")) return "Compact v0.14";
+                if (name.endsWith(".md") || name.endsWith(".mdx")) return "Markdown";
+                if (name.endsWith(".json")) return "JSON";
+                if (name.endsWith(".ts") || name.endsWith(".tsx")) return "TypeScript";
+                if (name.endsWith(".js") || name.endsWith(".jsx")) return "JavaScript";
+                if (name.endsWith(".rs")) return "Rust";
+                if (name.endsWith(".py")) return "Python";
+                if (name.endsWith(".go")) return "Go";
+                if (name.endsWith(".sol")) return "Solidity";
+                if (name.endsWith(".css")) return "CSS";
+                if (name.endsWith(".scss")) return "SCSS";
+                if (name.endsWith(".html")) return "HTML";
+                if (name.endsWith(".sh") || name.endsWith(".bash")) return "Shell";
+                if (name.endsWith(".yml") || name.endsWith(".yaml")) return "YAML";
+                if (name.endsWith(".toml")) return "TOML";
+                return f.language;
+              })()}
             </span>
             <span style={{ color: "#3d3d3a" }}>│</span>
           </>
