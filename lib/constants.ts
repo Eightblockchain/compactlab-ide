@@ -12,46 +12,40 @@ export const COMPACT_TEMPLATES: Record<
 > = {
   counter: {
     name: "Counter",
-    description: "Simple counter with increment and decrement circuits",
+    description: "On-chain counter using the built-in Counter ledger type",
     files: [
       {
-        name: "main.compact",
+        name: "counter.compact",
         language: "compact",
-        content: `pragma language_version >= 0.14.0;
+        content: `pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
 
-// A simple counter contract demonstrating basic Compact patterns
-contract Counter {
+// On-chain counter — the canonical Midnight "Hello World".
+//
+// Key concepts:
+//  - export ledger: public on-chain state (visible to all)
+//  - Counter: built-in type with a single .increment(n) operation
+//  - export circuit: a ZK-provable transition function
+//  - constructor(): runs at deploy time, not a ZK circuit
 
-  // Ledger state: the counter value (public)
-  ledger counter: Uint<32>;
+// Public ledger state: the current round/count.
+// Counter is append-only — it can only be incremented, never set directly.
+export ledger round: Counter;
 
-  // Initialize the counter to zero
-  constructor() {
-    counter = 0;
-  }
+constructor() {
+  // No explicit initialization needed; Counter defaults to 0.
+}
 
-  // Increment the counter by a given amount
-  export circuit increment(amount: Uint<32>): [] {
-    counter = counter + amount;
-  }
+// Increment the counter by 1.
+// Each call produces a ZK proof that the transition is valid.
+export circuit increment(): [] {
+  round.increment(1);
+}
 
-  // Decrement the counter (with underflow protection)
-  export circuit decrement(amount: Uint<32>): [] {
-    assert counter >= amount, "Counter underflow";
-    counter = counter - amount;
-  }
-
-  // Reset counter to zero
-  export circuit reset(): [] {
-    counter = 0;
-  }
-
-  // Read current counter value
-  export circuit getCount(): Uint<32> {
-    return counter;
-  }
+// Increment by a custom amount.
+export circuit incrementBy(amount: Uint<64>): [] {
+  round.increment(amount);
 }
 `,
       },
@@ -60,169 +54,231 @@ contract Counter {
         language: "markdown",
         content: `# Counter Contract
 
-A minimal on-chain counter demonstrating core Compact concepts.
+The simplest possible Midnight contract: an on-chain counter backed by
+the built-in \`Counter\` ledger type.
+
+## Language concepts shown
+
+| Concept | Example |
+|---|---|
+| Language pragma | \`pragma language_version >= 0.20;\` |
+| Standard library | \`import CompactStandardLibrary;\` |
+| Public ledger state | \`export ledger round: Counter;\` |
+| Constructor | \`constructor() { ... }\` |
+| Exported circuit | \`export circuit increment(): [] { ... }\` |
+| Built-in Counter method | \`round.increment(1);\` |
 
 ## Circuits
 
-| Circuit     | Parameters         | Returns    | Description                    |
-|-------------|--------------------|------------|--------------------------------|
-| increment   | amount: Uint<32>   | []         | Add to the counter             |
-| decrement   | amount: Uint<32>   | []         | Subtract with underflow guard  |
-| reset       | —                  | []         | Reset the counter to zero      |
-| getCount    | —                  | Uint<32>   | Read the current value         |
+| Circuit | Parameters | Returns | Description |
+|---|---|---|---|
+| \`increment\` | — | \`[]\` | Add 1 to the counter |
+| \`incrementBy\` | \`amount: Uint<64>\` | \`[]\` | Add any amount |
 
-## Quick Start
+## Notes
 
-1. Click **Run** to compile
-2. Open **Circuit Inspector**, select \`increment\`
-3. Set \`amount = 5\` and press Simulate
+- \`Counter\` is a built-in Compact type — it can only ever go up
+- Each circuit call produces a zero-knowledge proof verified on-chain
+- The public ledger value \`round\` is readable by anyone via the indexer
 `,
       },
     ],
   },
 
   voting: {
-    name: "Private Voting",
-    description: "Zero-knowledge voting system with private ballots",
+    name: "Anonymous Voting",
+    description: "Private ballot system — who voted is public, what they voted is secret",
     files: [
       {
-        name: "main.compact",
+        name: "voting.compact",
         language: "compact",
-        content: `pragma language_version >= 0.14.0;
+        content: `pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
 
-// Private voting contract using ZK proofs
-// Voters can cast ballots without revealing their choice publicly
-contract PrivateVoting {
+// Anonymous on-chain voting using zero-knowledge proofs.
+//
+// Privacy model:
+//  - WHO voted is public (ZswapCoinPublicKey stored in a Set — prevents double-voting)
+//  - WHAT they voted is PRIVATE (provided as a witness, never revealed)
+//  - The ZK proof proves the vote is valid without disclosing the choice
+//
+// Key concepts:
+//  - witness: a private value provided off-chain by the caller
+//  - disclose(): required when writing circuit/witness values to the ledger
+//  - Set<T>: built-in ledger type for membership tracking
+//  - Counter: built-in append-only counter for tallying
 
-  // Public ledger state
-  ledger votesFor: Uint<64>;
-  ledger votesAgainst: Uint<64>;
-  ledger totalVoters: Uint<64>;
-  ledger votingOpen: Boolean;
+export enum VotingState { Open, Closed }
 
-  // Witness: the secret vote and voter commitment
-  witness voterSecret: Bytes<32>;
-  witness voteChoice: Boolean;
+// Public on-chain state
+export ledger state: VotingState;
+export ledger votesFor: Counter;
+export ledger votesAgainst: Counter;
+export ledger voters: Set<ZswapCoinPublicKey>;  // tracks participation, not choices
 
-  constructor() {
-    votesFor = 0;
-    votesAgainst = 0;
-    totalVoters = 0;
-    votingOpen = true;
+// Private witness: the caller supplies their vote choice off-chain.
+// This value is NEVER put on-chain — only its effect on the tally is proven.
+witness voteChoice(): Boolean;  // true = For, false = Against
+
+constructor() {
+  state = VotingState.Open;
+}
+
+// Cast a private vote.
+// The ZK proof guarantees a valid choice was made without revealing it.
+export circuit castVote(): [] {
+  assert(state == VotingState.Open, "Voting is closed");
+
+  const voter = ownPublicKey();
+  assert(!voters.member(voter), "Already voted");
+
+  // Record participation publicly (prevents double-voting)
+  voters.insert(disclose(voter));
+
+  // Tally the private choice
+  const choice = voteChoice();
+  if (choice) {
+    votesFor.increment(1);
+  } else {
+    votesAgainst.increment(1);
   }
+}
 
-  // Cast a private vote using ZK proof
-  export circuit castVote(
-    voterCommitment: Bytes<32>
-  ): [] {
-    assert votingOpen, "Voting is closed";
-    const computedCommitment = hash(voterSecret);
-    assert computedCommitment == voterCommitment, "Invalid commitment";
-    if voteChoice {
-      votesFor = votesFor + 1;
-    } else {
-      votesAgainst = votesAgainst + 1;
-    }
-    totalVoters = totalVoters + 1;
-  }
-
-  // Close voting (admin only)
-  export circuit closeVoting(): [] {
-    votingOpen = false;
-  }
-
-  // Get results (only after voting closes)
-  export circuit getResults(): [Uint<64>, Uint<64>] {
-    assert !votingOpen, "Voting still in progress";
-    return [votesFor, votesAgainst];
-  }
+// Close the poll. Any participant can call this after the voting period.
+export circuit closeVoting(): [] {
+  assert(state == VotingState.Open, "Already closed");
+  state = VotingState.Closed;
 }
 `,
       },
       {
         name: "README.md",
         language: "markdown",
-        content: `# Private Voting Contract
+        content: `# Anonymous Voting Contract
 
-Zero-knowledge voting — ballots are private, tallies are public.
+A zero-knowledge voting system where ballot choices are provably secret.
 
-## How It Works
+## How it works
 
-Voters use a **secret witness** and submit a **commitment** on-chain.
-The ZK proof verifies ballot validity without revealing the choice.
+1. Each voter calls \`castVote()\` and provides their choice **privately** as a witness
+2. The contract's ZK circuit proves the vote is valid (binary choice, not double-vote)
+3. The on-chain tally updates without any record of who voted which way
+4. \`voters\` set tracks participation (prevents double-voting) but not preferences
+
+## Privacy model
+
+| Data | Visibility |
+|---|---|
+| Who voted | **Public** (stored in \`voters: Set<ZswapCoinPublicKey>\`) |
+| Vote choice (For/Against) | **Private** (witness, never on-chain) |
+| Running tallies | **Public** (\`votesFor\`, \`votesAgainst\` Counters) |
+| Voting status | **Public** (\`state: VotingState\`) |
+
+## Language concepts shown
+
+| Concept | Example |
+|---|---|
+| Enum | \`export enum VotingState { Open, Closed }\` |
+| Set ledger | \`export ledger voters: Set<ZswapCoinPublicKey>;\` |
+| Counter ledger | \`export ledger votesFor: Counter;\` |
+| Private witness | \`witness voteChoice(): Boolean;\` |
+| Caller identity | \`ownPublicKey()\` returns \`ZswapCoinPublicKey\` |
+| Explicit disclosure | \`disclose(voter)\` — marks value as going public |
+| Assert with message | \`assert(condition, "message")\` |
 
 ## Circuits
 
-| Circuit      | Description                             |
-|--------------|-----------------------------------------|
-| castVote     | Submit a private ballot with ZK proof   |
-| closeVoting  | End the voting period (admin)           |
-| getResults   | Read aggregate totals after voting ends |
+| Circuit | Returns | Description |
+|---|---|---|
+| \`castVote\` | \`[]\` | Cast a private ballot (ZK-proven) |
+| \`closeVoting\` | \`[]\` | End the voting period |
 `,
       },
     ],
   },
 
   token: {
-    name: "Private Token",
-    description: "Confidential token transfer with hidden balances",
+    name: "Fungible Token",
+    description: "ERC-20 style token with public balances mapped to ZswapCoinPublicKey",
     files: [
       {
-        name: "main.compact",
+        name: "token.compact",
         language: "compact",
-        content: `pragma language_version >= 0.14.0;
+        content: `pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
 
-// Confidential token contract
-// Balances are private; transfers use ZK proofs
-contract PrivateToken {
+// Fungible token with public balances.
+//
+// Architecture:
+//  - Balances are stored in a Map<ZswapCoinPublicKey, Uint<128>>
+//  - The deployer receives the entire initial supply at construction
+//  - transfer() and mint() demonstrate disclose() and Map manipulation
+//
+// Key concepts:
+//  - Map<K, V>: .member(k), .lookup(k), .insert(k, v), .remove(k), .size()
+//  - Uint<N> arithmetic requires explicit disclose() and 'as Uint<N>' casts
+//  - sealed ledger: written once in constructor, immutable thereafter
+//  - ownPublicKey(): returns the ZswapCoinPublicKey of the transaction caller
 
-  // Only total supply is public
-  ledger totalSupply: Uint<128>;
-  ledger name: Bytes<32>;
-  ledger symbol: Bytes<8>;
+// Immutable token metadata (set once in constructor)
+export sealed ledger tokenName: Opaque<"string">;
+export sealed ledger tokenSymbol: Opaque<"string">;
 
-  // Private: witness variables for transfer proofs
-  witness senderBalance: Uint<128>;
-  witness receiverBalance: Uint<128>;
-  witness transferAmount: Uint<128>;
-  witness senderSecret: Bytes<32>;
-  witness receiverSecret: Bytes<32>;
+// Mutable public state
+export ledger totalSupply: Uint<128>;
+export ledger balances: Map<ZswapCoinPublicKey, Uint<128>>;
 
-  constructor(
-    tokenName: Bytes<32>,
-    tokenSymbol: Bytes<8>,
-    initialSupply: Uint<128>
-  ) {
-    name = tokenName;
-    symbol = tokenSymbol;
-    totalSupply = initialSupply;
+constructor() {
+  // Set immutable metadata
+  tokenName = "MidnightToken";
+  tokenSymbol = "MDT";
+
+  // Mint the entire initial supply to the deployer
+  const initialSupply: Uint<128> = 1000000;
+  totalSupply = initialSupply;
+  balances.insert(ownPublicKey(), initialSupply);
+}
+
+// Transfer \`amount\` tokens from the caller to \`to\`.
+export circuit transfer(to: ZswapCoinPublicKey, amount: Uint<128>): [] {
+  const sender = ownPublicKey();
+
+  assert(balances.member(sender), "Sender has no balance");
+  const senderBal = balances.lookup(sender);
+  assert(senderBal >= amount, "Insufficient balance");
+
+  // Deduct from sender
+  balances.insert(disclose(sender), disclose(senderBal - amount as Uint<128>));
+
+  // Credit recipient
+  if (balances.member(disclose(to))) {
+    const toBalance = balances.lookup(disclose(to));
+    balances.insert(disclose(to), disclose(toBalance + amount as Uint<128>));
+  } else {
+    balances.insert(disclose(to), disclose(amount));
   }
+}
 
-  // Transfer tokens privately
-  export circuit transfer(
-    senderCommitment: Bytes<32>,
-    receiverCommitment: Bytes<32>,
-    newSenderCommitment: Bytes<32>,
-    newReceiverCommitment: Bytes<32>
-  ): [] {
-    assert senderBalance >= transferAmount, "Insufficient balance";
-    const computedSender = hash(senderSecret, senderBalance);
-    assert computedSender == senderCommitment, "Invalid sender proof";
-    const computedReceiver = hash(receiverSecret, receiverBalance);
-    assert computedReceiver == receiverCommitment, "Invalid receiver proof";
-    const newSenderBal = senderBalance - transferAmount;
-    const newReceiverBal = receiverBalance + transferAmount;
-    assert hash(senderSecret, newSenderBal) == newSenderCommitment;
-    assert hash(receiverSecret, newReceiverBal) == newReceiverCommitment;
+// Read the balance of any account.
+export circuit balanceOf(account: ZswapCoinPublicKey): Uint<128> {
+  if (!balances.member(disclose(account))) {
+    return 0;
   }
+  return balances.lookup(disclose(account));
+}
 
-  // Mint new tokens (increases total supply)
-  export circuit mint(amount: Uint<128>): [] {
-    totalSupply = totalSupply + amount;
+// Mint new tokens to \`to\` (no access control in this example — add admin check for production).
+export circuit mint(to: ZswapCoinPublicKey, amount: Uint<128>): [] {
+  const newSupply = totalSupply + amount as Uint<128>;
+  totalSupply = disclose(newSupply);
+
+  if (balances.member(disclose(to))) {
+    const currentBal = balances.lookup(disclose(to));
+    balances.insert(disclose(to), disclose(currentBal + amount as Uint<128>));
+  } else {
+    balances.insert(disclose(to), disclose(amount));
   }
 }
 `,
@@ -230,21 +286,44 @@ contract PrivateToken {
       {
         name: "README.md",
         language: "markdown",
-        content: `# Confidential Token Contract
+        content: `# Fungible Token Contract
 
-Privacy-preserving token where individual balances remain hidden.
+An ERC-20 style token backed by \`Map<ZswapCoinPublicKey, Uint<128>>\`.
+Balances are public; all operations produce ZK proofs.
 
 ## Architecture
 
-- **Public**: \`totalSupply\`, token \`name\` and \`symbol\`
-- **Private**: individual balances stored as cryptographic commitments
+| Ledger | Type | Description |
+|---|---|---|
+| \`tokenName\` | \`sealed Opaque<"string">\` | Immutable token name |
+| \`tokenSymbol\` | \`sealed Opaque<"string">\` | Immutable ticker symbol |
+| \`totalSupply\` | \`Uint<128>\` | Total tokens in existence |
+| \`balances\` | \`Map<ZswapCoinPublicKey, Uint<128>>\` | Account balances |
+
+## Language concepts shown
+
+| Concept | Example |
+|---|---|
+| Sealed ledger | \`export sealed ledger tokenName: Opaque<"string">;\` |
+| Map ledger | \`export ledger balances: Map<ZswapCoinPublicKey, Uint<128>>;\` |
+| Map methods | \`.member(k)\`, \`.lookup(k)\`, \`.insert(k, v)\` |
+| Arithmetic cast | \`senderBal - amount as Uint<128>\` |
+| Explicit disclosure | \`disclose(sender)\`, \`disclose(newBalance)\` |
+| Caller identity | \`ownPublicKey(): ZswapCoinPublicKey\` |
 
 ## Circuits
 
-| Circuit   | Description                                   |
-|-----------|-----------------------------------------------|
-| transfer  | Move tokens privately with ZK balance proofs  |
-| mint      | Increase total supply                         |
+| Circuit | Parameters | Returns | Description |
+|---|---|---|---|
+| \`transfer\` | \`to: ZswapCoinPublicKey, amount: Uint<128>\` | \`[]\` | Send tokens |
+| \`balanceOf\` | \`account: ZswapCoinPublicKey\` | \`Uint<128>\` | Read balance |
+| \`mint\` | \`to: ZswapCoinPublicKey, amount: Uint<128>\` | \`[]\` | Create tokens |
+
+## Notes
+
+- Add \`assert(ownPublicKey() == admin, "Not admin")\` to \`mint\` for production use
+- Uint<128> arithmetic: always cast back with \`as Uint<128>\` after operations
+- \`sealed ledger\` values can only be written in the constructor
 `,
       },
     ],
@@ -252,29 +331,58 @@ Privacy-preserving token where individual balances remain hidden.
 
   blank: {
     name: "Blank Contract",
-    description: "Start from scratch with an empty scaffold",
+    description: "Empty Compact scaffold with correct syntax ready to build on",
     files: [
       {
-        name: "main.compact",
+        name: "contract.compact",
         language: "compact",
-        content: `pragma language_version >= 0.14.0;
+        content: `pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
 
-contract MyContract {
+// ─── Ledger state (public, on-chain) ───────────────────────────────────────
+// Ledger variables are declared at the top level (no contract {} wrapper).
+// Use \`export\` to make them readable from the TypeScript SDK.
+// Use \`sealed\` for values that should only be written once (in the constructor).
+//
+// export ledger myCounter: Counter;
+// export ledger owner: ZswapCoinPublicKey;
+// export ledger balances: Map<ZswapCoinPublicKey, Uint<128>>;
+// export ledger items: Set<Bytes<32>>;
+// export sealed ledger name: Opaque<"string">;
 
-  // Define your ledger state here
-  // ledger myValue: Uint<32>;
+// ─── Private witnesses ─────────────────────────────────────────────────────
+// Witnesses are private values provided off-chain by the caller.
+// They are NEVER stored on-chain — only their effect is ZK-proven.
+// Declare as function signatures: witness fnName(): ReturnType;
+//
+// witness secretKey(): Bytes<32>;
+// witness privateAmount(): Uint<64>;
 
-  constructor() {
-    // Initialize state
-  }
-
-  // Add your circuits here
-  // export circuit myCircuit(): [] {
-  //   // Circuit logic
-  // }
+// ─── Constructor ───────────────────────────────────────────────────────────
+// Runs once at deployment. Not a ZK circuit — no disclose() needed.
+constructor() {
+  // myCounter initializes to 0 by default (Counter type)
+  // owner = ownPublicKey();
+  // name = "MyContract";
 }
+
+// ─── Circuits ─────────────────────────────────────────────────────────────
+// Each exported circuit produces a ZK proof when called.
+// Rules:
+//  - assert(condition, "message") — parentheses required
+//  - disclose(value) — required when writing witnessed/param values to ledger
+//  - No variable-length loops (only for...of over fixed Vector<N, T>)
+//  - Counter uses .increment(n), Map uses .insert/.lookup/.member, Set uses .insert/.member
+//
+// export circuit doSomething(param: Uint<64>): [] {
+//   assert(param > 0, "param must be positive");
+//   myCounter.increment(param);
+// }
+//
+// export circuit readOwner(): ZswapCoinPublicKey {
+//   return owner;
+// }
 `,
       },
     ],
@@ -290,22 +398,25 @@ export const SAMPLE_PROJECTS: Array<{
 }> = [
   {
     id: "proj_1",
-    name: "Counter Demo",
-    description: "A simple counter demonstrating Compact's ledger and circuit primitives.",
+    name: "Counter",
+    description:
+      "On-chain counter using the built-in Counter ledger type and a single increment circuit.",
     template: "counter",
     updatedAt: Date.now() - 1000 * 60 * 30,
   },
   {
     id: "proj_2",
-    name: "Private Voting",
-    description: "Zero-knowledge voting system where ballots remain shielded.",
+    name: "Anonymous Voting",
+    description:
+      "ZK voting: participation is public (prevents double-voting), ballot choice stays private.",
     template: "voting",
     updatedAt: Date.now() - 1000 * 60 * 60 * 2,
   },
   {
     id: "proj_3",
-    name: "Confidential Token",
-    description: "ERC-20 style token with hidden balances using commitment schemes.",
+    name: "Fungible Token",
+    description:
+      "ERC-20 style token with Map<ZswapCoinPublicKey, Uint<128>> balances and transfer/mint circuits.",
     template: "token",
     updatedAt: Date.now() - 1000 * 60 * 60 * 24,
   },
