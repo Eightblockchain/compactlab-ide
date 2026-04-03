@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect, useCallback } from "react";
 import { useIDEStore } from "@/store/ide";
 import type { ProjectFile } from "@/store/ide";
 import { FileIcon } from "@/components/ui/file-icons";
@@ -49,7 +49,7 @@ function CompactVersionPicker({
 
       {open && (
         <div
-          className="absolute bottom-full mb-1 left-0 z-50 rounded-md border border-border shadow-xl overflow-hidden"
+          className="absolute top-full mt-1 right-0 z-50 rounded-md border border-border shadow-xl overflow-hidden"
           style={{ background: "#151515", minWidth: 170 }}
         >
           <div className="px-3 py-2 border-b border-border">
@@ -183,7 +183,40 @@ export function EditorTabBar() {
     closeTab,
     compactVersion,
     setCompactVersion,
+    code,
+    setCode,
+    saveProject,
   } = useIDEStore();
+
+  // ── Sync picker → file: update pragma when user picks a version ────────────
+  const handleVersionChange = useCallback((v: CompactVersion) => {
+    setCompactVersion(v);
+    const updated = code.replace(
+      /pragma language_version\s*>=\s*[\d.]+;/,
+      `pragma language_version >= ${v};`
+    );
+    if (updated !== code) {
+      setCode(updated);
+      // setCode marks the file dirty but auto-save only fires via Monaco's
+      // onChange. Schedule a save explicitly so the user doesn't have to.
+      setTimeout(() => saveProject(), 0);
+    }
+  }, [code, setCompactVersion, setCode, saveProject]);
+
+  // ── Sync file → picker: read pragma when switching tabs ───────────────────
+  useEffect(() => {
+    if (!activeFileId || !activeProject) return;
+    const f = activeProject.files.find((f) => f.id === activeFileId);
+    if (!f?.name.toLowerCase().endsWith(".compact")) return;
+    const match = code.match(/pragma language_version\s*>=\s*([\d.]+)/);
+    if (!match) return;
+    // Normalise "0.20.0" → "0.20"
+    const normalized = match[1].split(".").slice(0, 2).join(".");
+    if ((COMPACT_VERSIONS as readonly string[]).includes(normalized)) {
+      setCompactVersion(normalized as CompactVersion);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFileId]); // Only re-run on tab switch, not on every keystroke
 
   // Build the ordered list of open files from the active project
   const openFiles = openTabIds
@@ -255,7 +288,7 @@ export function EditorTabBar() {
                 return (
                   <CompactVersionPicker
                     current={compactVersion}
-                    onChange={setCompactVersion}
+                    onChange={handleVersionChange}
                   />
                 );
               }
@@ -281,11 +314,15 @@ export function EditorTabBar() {
         )}
         <span>Midnight Devnet</span>
         <span style={{ color: "#3d3d3a" }}>│</span>
-        <span>
+        <button
+          onClick={() => saveProject()}
+          title="Save (⌘S)"
+          className="flex items-center gap-1 px-1 rounded hover:bg-white/8 hover:text-text-secondary transition-colors"
+        >
           <kbd className="font-sans">⌘S</kbd> Save
-        </span>
+        </button>
         <span>
-          <kbd className="font-sans">⌘↵</kbd> Run
+          <kbd className="font-sans">⌘↵</kbd> Compile
         </span>
       </div>
     </div>
