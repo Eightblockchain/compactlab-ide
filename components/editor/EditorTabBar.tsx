@@ -1,10 +1,89 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState, useEffect } from "react";
 import { useIDEStore } from "@/store/ide";
 import type { ProjectFile } from "@/store/ide";
 import { FileIcon } from "@/components/ui/file-icons";
 import { cn } from "@/lib/utils";
+import { COMPACT_VERSIONS, COMPACT_STABLE_VERSION } from "@/lib/version";
+import type { CompactVersion } from "@/lib/version";
+
+// ─── Compact version picker ────────────────────────────────────────────────────
+
+function CompactVersionPicker({
+  current,
+  onChange,
+}: {
+  current: CompactVersion;
+  onChange: (v: CompactVersion) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        title="Switch Compact language version"
+        className={cn(
+          "flex items-center gap-1 px-1.5 py-0.5 rounded transition-colors",
+          "hover:bg-white/8 hover:text-text-secondary",
+          open && "bg-white/8 text-text-secondary"
+        )}
+        style={{ color: "#555552" }}
+      >
+        <span>Compact v{current}</span>
+        <svg viewBox="0 0 8 5" fill="currentColor" className="w-2 h-1.5 opacity-60">
+          <path d="M0 0l4 5 4-5H0z" />
+        </svg>
+      </button>
+
+      {open && (
+        <div
+          className="absolute bottom-full mb-1 left-0 z-50 rounded-md border border-border shadow-xl overflow-hidden"
+          style={{ background: "#151515", minWidth: 170 }}
+        >
+          <div className="px-3 py-2 border-b border-border">
+            <p className="text-2xs text-text-muted font-medium uppercase tracking-wider">Compact Language</p>
+          </div>
+          {COMPACT_VERSIONS.map((v) => (
+            <button
+              key={v}
+              onClick={() => { onChange(v); setOpen(false); }}
+              className={cn(
+                "w-full flex items-center justify-between px-3 py-1.5 text-xs text-left transition-colors",
+                v === current
+                  ? "text-accent"
+                  : "text-text-secondary hover:text-text-primary hover:bg-white/5"
+              )}
+            >
+              <span>v{v}</span>
+              <span className="flex items-center gap-1.5">
+                {v === COMPACT_STABLE_VERSION && (
+                  <span className="text-2xs px-1.5 py-0.5 rounded-sm bg-success/10 text-success">stable</span>
+                )}
+                {v === current && (
+                  <svg viewBox="0 0 12 12" fill="currentColor" className="w-3 h-3">
+                    <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Single tab ────────────────────────────────────────────────────────────────
 
@@ -102,6 +181,8 @@ export function EditorTabBar() {
     isDirty,
     openTab,
     closeTab,
+    compactVersion,
+    setCompactVersion,
   } = useIDEStore();
 
   // Build the ordered list of open files from the active project
@@ -166,29 +247,35 @@ export function EditorTabBar() {
       >
         {activeFileId && activeProject && (
           <>
-            <span style={{ color: "#555552" }}>
-              {(() => {
-                const f = activeProject.files.find((f) => f.id === activeFileId);
-                if (!f) return "";
-                const name = f.name.toLowerCase();
-                if (name.endsWith(".compact")) return "Compact v0.14";
-                if (name.endsWith(".md") || name.endsWith(".mdx")) return "Markdown";
-                if (name.endsWith(".json")) return "JSON";
-                if (name.endsWith(".ts") || name.endsWith(".tsx")) return "TypeScript";
-                if (name.endsWith(".js") || name.endsWith(".jsx")) return "JavaScript";
-                if (name.endsWith(".rs")) return "Rust";
-                if (name.endsWith(".py")) return "Python";
-                if (name.endsWith(".go")) return "Go";
-                if (name.endsWith(".sol")) return "Solidity";
-                if (name.endsWith(".css")) return "CSS";
-                if (name.endsWith(".scss")) return "SCSS";
-                if (name.endsWith(".html")) return "HTML";
-                if (name.endsWith(".sh") || name.endsWith(".bash")) return "Shell";
-                if (name.endsWith(".yml") || name.endsWith(".yaml")) return "YAML";
-                if (name.endsWith(".toml")) return "TOML";
-                return f.language;
-              })()}
-            </span>
+            {(() => {
+              const f = activeProject.files.find((f) => f.id === activeFileId);
+              if (!f) return null;
+              const name = f.name.toLowerCase();
+              if (name.endsWith(".compact")) {
+                return (
+                  <CompactVersionPicker
+                    current={compactVersion}
+                    onChange={setCompactVersion}
+                  />
+                );
+              }
+              const label =
+                name.endsWith(".md") || name.endsWith(".mdx") ? "Markdown" :
+                name.endsWith(".json") ? "JSON" :
+                name.endsWith(".ts") || name.endsWith(".tsx") ? "TypeScript" :
+                name.endsWith(".js") || name.endsWith(".jsx") ? "JavaScript" :
+                name.endsWith(".rs") ? "Rust" :
+                name.endsWith(".py") ? "Python" :
+                name.endsWith(".go") ? "Go" :
+                name.endsWith(".sol") ? "Solidity" :
+                name.endsWith(".css") ? "CSS" :
+                name.endsWith(".scss") ? "SCSS" :
+                name.endsWith(".html") ? "HTML" :
+                name.endsWith(".sh") || name.endsWith(".bash") ? "Shell" :
+                name.endsWith(".yml") || name.endsWith(".yaml") ? "YAML" :
+                name.endsWith(".toml") ? "TOML" : f.language;
+              return <span style={{ color: "#555552" }}>{label}</span>;
+            })()}
             <span style={{ color: "#3d3d3a" }}>│</span>
           </>
         )}

@@ -2,6 +2,8 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { generateId, slugify } from "@/lib/utils";
 import { COMPACT_TEMPLATES, SAMPLE_PROJECTS } from "@/lib/constants";
+import { COMPACT_STABLE_VERSION } from "@/lib/version";
+import type { CompactVersion } from "@/lib/version";
 import type { CompileResult, SimulateResult, DeployResult, LogEntry } from "@/lib/compact";
 
 export type IDEStatus = "idle" | "compiling" | "simulating" | "deploying" | "saving";
@@ -83,6 +85,9 @@ export interface IDEStore {
   bottomPanelOpen: boolean;
   sidebarOpen: boolean;
 
+  // Compact language version (persisted, drives status-bar label + pragma snippet)
+  compactVersion: CompactVersion;
+
   // Modal
   isNewProjectModalOpen: boolean;
   newProjectModalTemplate: string;
@@ -130,6 +135,7 @@ export interface IDEStore {
   setBottomPanelOpen: (open: boolean) => void;
   setSidebarOpen: (open: boolean) => void;
   setNewProjectModalOpen: (open: boolean, template?: string) => void;
+  setCompactVersion: (version: CompactVersion) => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -225,6 +231,7 @@ export const useIDEStore = create<IDEStore>()(
 
       isNewProjectModalOpen: false,
       newProjectModalTemplate: "blank",
+      compactVersion: COMPACT_STABLE_VERSION,
 
       openTabIds: firstFile ? [firstFile.id] : [],
       tabBuffers: {},
@@ -640,6 +647,7 @@ export const useIDEStore = create<IDEStore>()(
       setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
       setNewProjectModalOpen: (open, template = "blank") =>
         set({ isNewProjectModalOpen: open, newProjectModalTemplate: template }),
+      setCompactVersion: (compactVersion) => set({ compactVersion }),
     }),
     {
       name: "compactlab-v4",
@@ -650,6 +658,7 @@ export const useIDEStore = create<IDEStore>()(
         sidebarOpen: state.sidebarOpen,
         bottomPanelOpen: state.bottomPanelOpen,
         rightPanelTab: state.rightPanelTab,
+        compactVersion: state.compactVersion,
       }),
       onRehydrateStorage: () => (state) => {
         if (!state) return;

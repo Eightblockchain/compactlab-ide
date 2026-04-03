@@ -7,6 +7,7 @@ import { Divider, IconButton } from "@/components/ui";
 import { FileIcon, FolderIcon, MidnightIcon, getFolderColor } from "@/components/ui/file-icons";
 import { cn } from "@/lib/utils";
 import { COMPACT_TEMPLATES } from "@/lib/constants";
+import { APP_VERSION } from "@/lib/version";
 
 const _MODULE_NOW = Date.now();
 
@@ -684,7 +685,7 @@ export function Sidebar() {
         <div className="flex items-center gap-1.5">
           <div className="w-1.5 h-1.5 rounded-full bg-success" />
           <span className="text-xs text-text-muted">Midnight Devnet</span>
-          <span className="ml-auto text-xs text-text-dim">v0.21.0</span>
+          <span className="ml-auto text-xs text-text-dim" title="CompactLab version">v{APP_VERSION}</span>
         </div>
       </div>
     </aside>
