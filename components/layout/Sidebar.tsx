@@ -40,12 +40,6 @@ function TemplateTag({ id }: { id: string }) {
 
 // ─── Inline forms ──────────────────────────────────────────────────────────────
 
-function detectLanguage(name: string): ProjectFile["language"] {
-  if (name.endsWith(".md") || name.endsWith(".mdx")) return "markdown";
-  if (name.endsWith(".json")) return "json";
-  return "compact";
-}
-
 function AddFileForm({ onAdd, onCancel }: { onAdd: (name: string) => void; onCancel: () => void }) {
   const [value, setValue] = useState("");
   return (
