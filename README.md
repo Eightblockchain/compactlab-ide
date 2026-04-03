@@ -1,36 +1,125 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# CompactLab IDE
+
+> A browser-based IDE for writing, simulating, and deploying smart contracts on the [Midnight](https://midnight.network) blockchain using the **Compact** language.
+
+---
+
+## What is this?
+
+[Midnight](https://midnight.network) is a privacy-focused blockchain built on Cardano. Smart contracts on Midnight are written in **Compact** — a domain-specific language designed for zero-knowledge proof generation.
+
+**CompactLab** is the development environment for Compact. Think of it as an in-browser IDE — like Remix for Ethereum, but purpose-built for Midnight. You write Compact code, inspect circuits, simulate execution, and deploy contracts, all without leaving your browser.
+
+---
+
+## Features
+
+- **Monaco Editor** — full-featured code editor with Compact syntax highlighting, keyword/type completion, and bracket matching
+- **Compact Language Support** — custom tokenizer and theme covering keywords (`circuit`, `contract`, `ledger`, `pragma`), types (`Uint`, `Boolean`, `Bytes`), operators, strings, and comments
+- **Resizable Panel Layout** — sidebar for project navigation, central editor, bottom output panel, and right-side circuit inspector — all resizable
+- **Circuit Inspector** — visualize the zero-knowledge circuits extracted from your contract, including public/private inputs and witness parameters
+- **Simulate & Deploy** — run mock simulations and trigger deployment flows directly from the IDE toolbar
+- **Project Management** — create, switch between, and persist multiple Compact projects in the browser
+- **Deep Dark Theme** — purpose-designed dark UI with `#F06358` coral brand accent, high-contrast syntax colors, and zero visual noise
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Framework | Next.js 16 (App Router, Turbopack) |
+| Language | TypeScript |
+| Styling | Tailwind CSS v4 (CSS-first config) |
+| Editor | Monaco Editor (`@monaco-editor/react`) |
+| State | Zustand with persist middleware |
+| Panels | react-resizable-panels v4 |
+| Animations | Framer Motion |
+| Database | Prisma (schema ready, SQLite by default) |
+| Validation | Zod |
+
+---
 
 ## Getting Started
 
-First, run the development server:
+### Prerequisites
+
+- Node.js 18+
+- npm
+
+### Install & Run
 
 ```bash
+git clone https://github.com/Eightblockchain/compactlab-ide.git
+cd compactlab-ide
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000/playground](http://localhost:3000/playground) to launch the IDE.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Build for Production
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run build
+npm start
+```
 
-## Learn More
+---
 
-To learn more about Next.js, take a look at the following resources:
+## Project Structure
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```
+compactlab/
+├── app/
+│   ├── playground/        # Main IDE page
+│   ├── api/
+│   │   ├── compile/       # Compile endpoint
+│   │   ├── deploy/        # Deploy endpoint
+│   │   └── projects/      # Project CRUD
+│   ├── globals.css        # Design tokens + global styles
+│   └── layout.tsx
+├── components/
+│   ├── editor/
+│   │   ├── CompactEditor.tsx      # Monaco editor wrapper
+│   │   └── compact-language.ts   # Tokenizer, theme, completions
+│   ├── layout/
+│   │   ├── Topbar.tsx
+│   │   └── Sidebar.tsx
+│   └── panels/
+│       ├── InspectorPanel.tsx
+│       └── BottomPanel.tsx
+├── store/
+│   └── ide.ts             # Zustand global state
+├── lib/
+│   ├── compact.ts         # Compact language utilities
+│   ├── constants.ts
+│   └── utils.ts
+└── prisma/
+    └── schema.prisma
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
+## Roadmap
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- [ ] Real Compact compiler integration via WASM
+- [ ] Live ZK proof simulation output
+- [ ] Midnight testnet deployment
+- [ ] Project export / import
+- [ ] Collaborative editing
+- [ ] Dark/light theme toggle
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+
+## About Midnight & Compact
+
+Midnight is a data-protection blockchain that lets developers build applications where sensitive data is shielded using zero-knowledge proofs. Compact is its native smart contract language — it compiles down to ZK circuits that Midnight executes privately on-chain.
+
+Learn more: [midnight.network](https://midnight.network)
+
+---
+
+## License
+
+MIT
