@@ -13,6 +13,7 @@ export type LogTab = "logs" | "compile" | "network";
 export interface ProjectFolder {
   id: string;
   name: string;
+  parentId: string | null;
   createdAt: number;
 }
 
@@ -99,7 +100,7 @@ export interface IDEStore {
   closeTab: (fileId: string) => void;
   addFile: (name: string, language?: ProjectFile["language"], folderId?: string | null) => ProjectFile | null;
   deleteFile: (fileId: string) => void;
-  addFolder: (name: string) => ProjectFolder | null;
+  addFolder: (name: string, parentId?: string | null) => ProjectFolder | null;
   deleteFolder: (folderId: string) => void;
   renameFolder: (folderId: string, name: string) => void;
   setCode: (code: string) => void;
@@ -386,13 +387,13 @@ export const useIDEStore = create<IDEStore>()(
         });
       },
 
-      addFolder: (name) => {
+      addFolder: (name, parentId = null) => {
         const { activeProjectId, activeProject, projects } = get();
         if (!activeProjectId || !activeProject) return null;
-        const folder: ProjectFolder = { id: generateId(), name, createdAt: Date.now() };
+        const folder: ProjectFolder = { id: generateId(), name, parentId, createdAt: Date.now() };
         const updated: Project = {
           ...activeProject,
-          folders: [...activeProject.folders, folder],
+          folders: [...(activeProject.folders ?? []), folder],
           updatedAt: Date.now(),
         };
         set({
@@ -405,12 +406,20 @@ export const useIDEStore = create<IDEStore>()(
       deleteFolder: (folderId) => {
         const { activeProjectId, activeProject, projects } = get();
         if (!activeProjectId || !activeProject) return;
-        // Move folder's files to root
+        // Collect all descendant folder IDs recursively
+        const allFolders = activeProject.folders ?? [];
+        const toDelete = new Set<string>();
+        const collect = (id: string) => {
+          toDelete.add(id);
+          allFolders.forEach((f) => { if (f.parentId === id) collect(f.id); });
+        };
+        collect(folderId);
+        // Move affected files to root, remove all deleted folders
         const updated: Project = {
           ...activeProject,
-          folders: activeProject.folders.filter((f) => f.id !== folderId),
+          folders: allFolders.filter((f) => !toDelete.has(f.id)),
           files: activeProject.files.map((f) =>
-            f.folderId === folderId ? { ...f, folderId: null } : f
+            f.folderId && toDelete.has(f.folderId) ? { ...f, folderId: null } : f
           ),
           updatedAt: Date.now(),
         };
