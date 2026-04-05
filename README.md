@@ -2,6 +2,8 @@
 
 > A browser-based IDE for writing, simulating, and deploying smart contracts on the [Midnight](https://midnight.network) blockchain using the **Compact** language.
 
+This project extends the Midnight Network with additional developer tooling.
+
 ---
 
 ## What is this?
