@@ -3,10 +3,10 @@
 import { useIDEStore } from "@/store/ide";
 import { Button, StatusDot, Divider } from "@/components/ui";
 import { cn, formatAddress, generateId } from "@/lib/utils";
-import { mockDeploy } from "@/lib/compact";
 import { useState, useRef, useEffect } from "react";
 import { useLaceWallet } from "@/hooks/useLaceWallet";
-import type { CompileResult } from "@/lib/compact";
+import type { CompileResult, DeployResult } from "@/lib/compact";
+import { deployPlaygroundContract } from "@/lib/playground-deploy";
 
 export function Topbar() {
   const {
@@ -151,10 +151,23 @@ export function Topbar() {
 
     addLog({ id: generateId(), timestamp: Date.now(), level: "success", message: "Compilation successful", source: "compiler" });
 
-    // Deploy
+    // Deploy — runs entirely in the browser via Lace wallet
     setLogTab("network");
     setStatus("deploying");
-    const deployResult = await mockDeploy(addLog);
+
+    let deployResult: DeployResult;
+    try {
+      deployResult = await deployPlaygroundContract(
+        lace.connectedAPI!,
+        activeProject?.template ?? "",
+        addLog,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      addLog({ id: generateId(), timestamp: Date.now(), level: "error", message: `Deploy failed: ${message}`, source: "network" });
+      deployResult = { success: false, duration: 0, error: message };
+    }
+
     setDeployResult(deployResult);
     setStatus("idle");
 
