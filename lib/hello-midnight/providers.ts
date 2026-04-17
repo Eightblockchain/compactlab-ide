@@ -72,9 +72,12 @@ export async function createHelloWorldProviders(
   const coinPublicKey = addresses.shieldedCoinPublicKey;
 
   // 3. ZK config provider — serves keys/zkir from /public/contracts/hello-world/
+  //    Pass window.fetch explicitly to avoid cross-fetch bundling issues with Turbopack,
+  //    and to ensure the request always runs in the page's origin context.
   const zkConfigBaseUrl = `${window.location.origin}/contracts/hello-world`;
   const zkConfigProvider = new FetchZkConfigProvider<HelloWorldCircuitId>(
-    zkConfigBaseUrl
+    zkConfigBaseUrl,
+    (url: string, init?: RequestInit) => window.fetch(url, init),
   );
 
   // 4. Proof provider — delegates proving to the Lace wallet extension.

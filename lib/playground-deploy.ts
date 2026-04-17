@@ -105,7 +105,10 @@ export async function deployPlaygroundContract(
     ({ contractAddress } = await api.deploy());
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    log("error", `Deploy transaction failed: ${msg}`);
+    // ZKConfigurationReadError wraps the real cause — surface it
+    const cause = (err as { cause?: unknown })?.cause;
+    const causeMsg = cause instanceof Error ? `: ${cause.message}` : cause ? `: ${String(cause)}` : "";
+    log("error", `Deploy transaction failed: ${msg}${causeMsg}`);
     if (msg.includes("verifier key") || msg.includes("prover key") || msg.includes("zkir")) {
       log("warn", "ZK asset fetch failed. Expected files at /contracts/hello-world/keys/ and /contracts/hello-world/zkir/.");
       log("warn", "Make sure the Next.js dev server is running on localhost:3000 and the /public/contracts/ directory is present.");
@@ -113,7 +116,7 @@ export async function deployPlaygroundContract(
     if (msg.includes("user") || msg.toLowerCase().includes("cancel") || msg.toLowerCase().includes("reject")) {
       log("warn", "It looks like the wallet request was rejected. Open Lace and approve the transaction.");
     }
-    return { success: false, duration: Date.now() - t0, error: msg };
+    return { success: false, duration: Date.now() - t0, error: `${msg}${causeMsg}` };
   }
 
   const duration = Date.now() - t0;

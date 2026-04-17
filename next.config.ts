@@ -75,10 +75,12 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        // Serve all contract assets with CORP header
+        // Serve all contract assets with CORP header + CORS so wallet service workers can load ZK keys
         source: "/contracts/(.*)",
         headers: [
           { key: "Cross-Origin-Resource-Policy", value: "cross-origin" },
+          { key: "Access-Control-Allow-Origin", value: "*" },
+          { key: "Access-Control-Allow-Methods", value: "GET, OPTIONS" },
         ],
       },
     ];
