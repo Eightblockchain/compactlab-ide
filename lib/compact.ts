@@ -139,20 +139,20 @@ export async function mockCompile(
   onLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Starting compilation...", source: "compiler" });
   await sleep(300);
 
-  // Check for syntax errors (very basic mock)
-  const hasContractDecl = /contract\s+\w+/.test(code);
   const hasPragma = /pragma language_version/.test(code);
+  const hasExportedCircuit = /export\s+circuit\s+\w+/.test(code);
+  const hasLedger = /export\s+ledger\s+\w+/.test(code);
 
   if (!hasPragma) {
     onLog({ id: generateId(), timestamp: Date.now(), level: "warn", message: "Missing pragma language_version declaration", source: "compiler" });
   }
 
-  if (!hasContractDecl) {
-    onLog({ id: generateId(), timestamp: Date.now(), level: "error", message: "No contract declaration found", source: "compiler" });
+  if (!hasExportedCircuit && !hasLedger) {
+    onLog({ id: generateId(), timestamp: Date.now(), level: "error", message: "No exported circuits or ledger declarations found", source: "compiler" });
     return {
       success: false,
       duration: Date.now() - start,
-      errors: [{ line: 1, column: 1, message: "Expected 'contract' declaration", severity: "error" }],
+      errors: [{ line: 1, column: 1, message: "Add at least one `export circuit` or `export ledger` declaration", severity: "error" }],
     };
   }
 

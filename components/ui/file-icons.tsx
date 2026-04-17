@@ -62,7 +62,7 @@ export function FolderIcon({
 export function getFolderColor(name: string): string {
   const n = name.toLowerCase();
   if (/^src$|^source$/.test(n)) return "#DCB67A";
-  if (/^(dist|build|out|output)$/.test(n)) return "#A3BE8C";
+  if (/^(dist|build|out|output|generated)$/.test(n)) return "#A3BE8C";
   if (/^(node_modules|\.npm)$/.test(n)) return "#BF616A";
   if (/^(test|tests|__tests__|spec|specs)$/.test(n)) return "#88C0D0";
   if (/^(public|static|assets|media)$/.test(n)) return "#EBCB8B";
