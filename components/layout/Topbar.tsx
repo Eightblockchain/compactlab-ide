@@ -51,6 +51,19 @@ export function Topbar() {
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+  const [showWalletPicker, setShowWalletPicker] = useState(false);
+  const walletPickerRef = useRef<HTMLDivElement>(null);
+
+  // Close wallet picker on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (walletPickerRef.current && !walletPickerRef.current.contains(e.target as Node)) {
+        setShowWalletPicker(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   const handleRun = async () => {
     if (status !== "idle") return;
@@ -322,14 +335,14 @@ export function Topbar() {
               "border border-success/20 bg-success/8 text-success text-sm font-medium",
               "hover:bg-success/12 transition-colors"
             )}
-            title="Connected to Lace — click to disconnect"
+            title={`Connected to ${lace.connectedWalletName ?? "wallet"} — click to disconnect`}
           >
             <span className="w-1.5 h-1.5 rounded-full bg-success" />
             {formatAddress(lace.walletInfo.unshieldedAddress)}
           </button>
         ) : lace.status === "error" ? (
           <button
-            onClick={lace.connect}
+            onClick={() => lace.availableWallets.length > 1 ? setShowWalletPicker(true) : lace.connect()}
             className={cn(
               "flex items-center gap-1.5 rounded px-2.5 py-1.5 h-7",
               "border border-error/30 bg-error/8 text-error text-sm font-medium",
@@ -341,20 +354,63 @@ export function Topbar() {
             Retry
           </button>
         ) : (
-          <Button
-            variant="default"
-            size="md"
-            onClick={lace.isInstalled ? lace.connect : () => window.open("https://lace.io", "_blank")}
-            loading={lace.status === "connecting"}
-            disabled={lace.status === "connecting"}
-            className="gap-1.5"
-          >
-            <svg className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4">
-              <rect x="1" y="4" width="12" height="8" rx="1.5" />
-              <path d="M1 7h12M10 8.5h.5" strokeLinecap="round" />
-            </svg>
-            {!lace.isInstalled ? "Install Lace" : lace.status === "connecting" ? "Connecting…" : "Connect Wallet"}
-          </Button>
+          <div className="relative" ref={walletPickerRef}>
+            <Button
+              variant="default"
+              size="md"
+              onClick={() => {
+                if (!lace.isInstalled) {
+                  window.open("https://lace.io", "_blank");
+                } else if (lace.availableWallets.length > 1) {
+                  setShowWalletPicker((v) => !v);
+                } else {
+                  void lace.connect();
+                }
+              }}
+              loading={lace.status === "connecting"}
+              disabled={lace.status === "connecting"}
+              className="gap-1.5"
+            >
+              <svg className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4">
+                <rect x="1" y="4" width="12" height="8" rx="1.5" />
+                <path d="M1 7h12M10 8.5h.5" strokeLinecap="round" />
+              </svg>
+              {!lace.isInstalled
+                ? "Install Lace"
+                : lace.status === "connecting"
+                ? "Connecting…"
+                : lace.availableWallets.length > 1
+                ? "Connect Wallet ▾"
+                : "Connect Wallet"}
+            </Button>
+
+            {/* Wallet picker dropdown */}
+            {showWalletPicker && lace.availableWallets.length > 0 && (
+              <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] bg-surface-2 border border-border rounded-md shadow-lg overflow-hidden">
+                <div className="px-3 py-1.5 border-b border-border">
+                  <span className="text-2xs text-text-muted uppercase tracking-wide">Choose wallet</span>
+                </div>
+                {lace.availableWallets.map((wallet) => (
+                  <button
+                    key={wallet.rdns}
+                    onClick={async () => {
+                      setShowWalletPicker(false);
+                      await lace.connectTo(wallet);
+                    }}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-text-primary hover:bg-white/6 transition-colors"
+                  >
+                    {wallet.icon ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={wallet.icon} alt="" className="w-5 h-5 rounded" />
+                    ) : (
+                      <span className="w-5 h-5 rounded bg-white/10 flex items-center justify-center text-2xs">■</span>
+                    )}
+                    <span>{wallet.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </header>

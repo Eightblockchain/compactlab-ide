@@ -23,6 +23,8 @@ import type {
 import type { ConnectionStatus, WalletInfo } from "@/lib/hello-midnight/types";
 
 export interface UseLaceWalletReturn {
+  /** All Midnight wallets currently injected in window.midnight */
+  availableWallets: InitialAPI[];
   /** Whether any Midnight wallet extension is installed */
   isInstalled: boolean;
   /** Current connection status */
@@ -33,68 +35,65 @@ export interface UseLaceWalletReturn {
   connectedAPI: ConnectedAPI | null;
   /** Wallet addresses (available when status === 'connected') */
   walletInfo: WalletInfo | null;
-  /** Connect to the wallet. Returns the ConnectedAPI on success, null on failure. */
+  /** Wallet name shown in UI (from InitialAPI.name) */
+  connectedWalletName: string | null;
+  /** Connect to a specific wallet. Returns the ConnectedAPI on success, null on failure. */
+  connectTo: (wallet: InitialAPI) => Promise<ConnectedAPI | null>;
+  /** Connect to the first available wallet (legacy convenience) */
   connect: () => Promise<ConnectedAPI | null>;
   /** Disconnect from the wallet */
   disconnect: () => void;
 }
 
-/** Returns the first available Midnight wallet from window.midnight, or null. */
-function detectWallet(): InitialAPI | null {
-  const midnight = (window as Window).midnight;
-  if (!midnight) return null;
-  const wallets = Object.values(midnight);
-  return wallets.length > 0 ? wallets[0] ?? null : null;
+/** Read all wallets currently in window.midnight. */
+function getWallets(): InitialAPI[] {
+  const midnight = window.midnight;
+  if (!midnight) return [];
+  return Object.values(midnight);
 }
 
 export function useLaceWallet(): UseLaceWalletReturn {
-  const [isInstalled, setIsInstalled] = useState(false);
+  const [availableWallets, setAvailableWallets] = useState<InitialAPI[]>([]);
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
   const [error, setError] = useState<string | null>(null);
   const [connectedAPI, setConnectedAPI] = useState<ConnectedAPI | null>(null);
   const [walletInfo, setWalletInfo] = useState<WalletInfo | null>(null);
+  const [connectedWalletName, setConnectedWalletName] = useState<string | null>(null);
 
-  // Retry detection up to 10 times × 500 ms (5 s) — extensions often inject
-  // into window.midnight a few hundred ms after the React tree mounts.
+  // Poll window.midnight up to 5 s — extensions inject after React mounts.
   useEffect(() => {
     let attempts = 0;
     const MAX_ATTEMPTS = 10;
     let timer: ReturnType<typeof setTimeout>;
 
-    const checkWallet = () => {
-      if (detectWallet()) {
-        setIsInstalled(true);
+    const checkWallets = () => {
+      const wallets = getWallets();
+      if (wallets.length > 0) {
+        setAvailableWallets(wallets);
         return;
       }
       attempts++;
       if (attempts < MAX_ATTEMPTS) {
-        timer = setTimeout(checkWallet, 500);
+        timer = setTimeout(checkWallets, 500);
       }
     };
 
-    checkWallet();
+    checkWallets();
     return () => clearTimeout(timer);
   }, []);
 
-  const connect = useCallback(async (): Promise<ConnectedAPI | null> => {
+  const connectTo = useCallback(async (wallet: InitialAPI): Promise<ConnectedAPI | null> => {
     setStatus("connecting");
     setError(null);
 
     try {
-      // Re-read window.midnight at call time — don't rely on cached isInstalled.
-      const wallet = detectWallet();
-      if (!wallet) {
-        throw new Error(
-          "No Midnight wallet extension found. Make sure the Midnight Lace wallet is installed and enabled, then try again."
-        );
-      }
-
       const api: ConnectedAPI = await wallet.connect("preprod");
 
       const addresses = await api.getShieldedAddresses();
       const { unshieldedAddress } = await api.getUnshieldedAddress();
 
       setConnectedAPI(api);
+      setConnectedWalletName(wallet.name);
       setWalletInfo({
         shieldedAddress: addresses.shieldedAddress,
         shieldedCoinPublicKey: addresses.shieldedCoinPublicKey,
@@ -102,7 +101,6 @@ export function useLaceWallet(): UseLaceWalletReturn {
         unshieldedAddress,
       });
       setStatus("connected");
-      setIsInstalled(true);
       return api;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -112,19 +110,35 @@ export function useLaceWallet(): UseLaceWalletReturn {
     }
   }, []);
 
+  const connect = useCallback(async (): Promise<ConnectedAPI | null> => {
+    // Re-read at call time in case wallet injected after initial poll.
+    const wallets = getWallets();
+    const wallet = wallets[0];
+    if (!wallet) {
+      setError("No Midnight wallet extension found. Install Midnight Lace from lace.io and reload.");
+      setStatus("error");
+      return null;
+    }
+    return connectTo(wallet);
+  }, [connectTo]);
+
   const disconnect = useCallback(() => {
     setConnectedAPI(null);
     setWalletInfo(null);
+    setConnectedWalletName(null);
     setStatus("disconnected");
     setError(null);
   }, []);
 
   return {
-    isInstalled,
+    availableWallets,
+    isInstalled: availableWallets.length > 0,
     status,
     error,
     connectedAPI,
     walletInfo,
+    connectedWalletName,
+    connectTo,
     connect,
     disconnect,
   };
