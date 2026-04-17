@@ -753,11 +753,11 @@ export const useIDEStore = create<IDEStore>()(
     }),
     {
       name: "compactlab-v4",
-      version: 3,
+      version: 4,
       migrate: (persistedState, fromVersion) => {
-        // v3: rebuild ALL template projects so contracts/ folder is created
+        // v4: rebuild ALL template projects so contracts/ folder and corrected api.ts are applied
         // (v2 only rebuilt hello-world; v3 rebuilds all template projects)
-        if (fromVersion < 3) {
+        if (fromVersion < 4) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const state = persistedState as any;
           if (state?.projects) {

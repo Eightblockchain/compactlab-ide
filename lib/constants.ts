@@ -84,65 +84,126 @@ export circuit storeMessage(newMessage: Opaque<"string">): [] {
         content: `/**
  * api.ts — Hello World contract API
  *
- * High-level typed wrapper around the compiled contract.
- * Run "Compile" first — generated/contract/index.d.ts must exist.
+ * Workflow:
+ *   1. Run:  npm run compile
+ *      → generates ./generated/contract/index.js  (JS module)
+ *      → generates ./generated/contract/index.d.ts (TypeScript types)
+ *
+ *   2. Uncomment the import below for full type safety, then use this class.
+ *
+ * Deploy:
+ *   const providers = await createProviders(walletAPI, "hello-world");
+ *   const api = await HelloWorldAPI.deploy(providers);
+ *   console.log("Contract address:", api.address);
+ *
+ * Join an existing deployment:
+ *   const api = await HelloWorldAPI.join(providers, contractAddress);
  */
 
-// After compiling, uncomment to get full type safety:
-// import type { HelloWorldContract } from "../generated/contract/index.js";
+import {
+  deployContract,
+  findDeployedContract,
+} from "@midnight-ntwrk/midnight-js-contracts";
+import type { ContractAddress } from "@midnight-ntwrk/midnight-js-types";
+import type { MidnightProvider } from "@midnight-ntwrk/midnight-js-types";
 
-import { Contract, witnesses } from "@midnight-ntwrk/midnight-js-contracts";
-import type { MidnightProvider, ContractAddress } from "@midnight-ntwrk/midnight-js-types";
-import type { createProviders } from "./providers.js";
+// ── Step 1: run "npm run compile", then uncomment this import ─────────────────
+// import * as HelloWorldModule from "../generated/contract/index.js";
 
-/** Mirrors the Compact ledger state */
+// ── Step 2: build the compiled contract descriptor ────────────────────────────
+// The generated index.js exports Contract (the circuit class) and witnesses
+// (empty for hello-world, which has no private state).
+//
+// Uncomment after compiling:
+// import { CompiledContract } from "@midnight-ntwrk/compact-js";
+// const compiledContract = CompiledContract
+//   .make("hello-world", HelloWorldModule.Contract)
+//   .pipe(CompiledContract.withVacantWitnesses);
+
+// ─── Ledger state type ────────────────────────────────────────────────────────
+
 export interface HelloWorldState {
-  /** The on-chain message. Undefined until storeMessage() is first called. */
+  /** The on-chain message. Undefined until storeMessage() is called first. */
   message: string | undefined;
 }
+
+// ─── API class ────────────────────────────────────────────────────────────────
 
 export class HelloWorldAPI {
   private constructor(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    private readonly contract: Contract<any>,
+    private readonly foundContract: any,
     public readonly address: ContractAddress,
   ) {}
 
   /**
-   * Deploy a brand-new Hello World contract.
-   * Requires a connected Lace wallet with tDUST on Preprod.
-   * Get tDUST: https://faucet.preprod.midnight.network/
+   * Deploy a new Hello World contract to Midnight Preprod.
+   *
+   * Requires:
+   *   - Midnight Lace wallet connected to Preprod
+   *   - tDUST balance (get from https://faucet.preprod.midnight.network/)
+   *   - Contract compiled ("npm run compile" first)
+   *
+   * @param providers  From createProviders() in ./providers.ts
+   * @param compiledContract  From CompiledContract.make(...) — see comments above
    */
   static async deploy(
-    providers: Awaited<ReturnType<typeof createProviders>>,
+    providers: MidnightProvider,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    compiledContract: any,
   ): Promise<HelloWorldAPI> {
-    const contract = new Contract(witnesses);
-    const { deployTxData } = await contract.deploy(providers, {
-      privateStateKey: "hello-world",
-      initialPrivateState: {},
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const deployed = await (deployContract as any)(providers, { compiledContract });
+    const address = deployed.deployTxData.public.contractAddress as ContractAddress;
+    return new HelloWorldAPI(deployed, address);
+  }
+
+  /**
+   * Join an already-deployed Hello World contract by address.
+   * Share this address with other users to let them interact with the same contract.
+   *
+   * @param providers  From createProviders() in ./providers.ts
+   * @param compiledContract  From CompiledContract.make(...) — see comments above
+   * @param contractAddress  The address returned by deploy()
+   */
+  static async join(
+    providers: MidnightProvider,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    compiledContract: any,
+    contractAddress: ContractAddress,
+  ): Promise<HelloWorldAPI> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const found = await (findDeployedContract as any)(providers, {
+      compiledContract,
+      contractAddress,
     });
-    return new HelloWorldAPI(contract, deployTxData.public.contractAddress);
+    return new HelloWorldAPI(found, contractAddress);
   }
 
-  /** Join an existing deployed contract by address */
-  static join(
-    providers: Awaited<ReturnType<typeof createProviders>>,
-    address: ContractAddress,
-  ): HelloWorldAPI {
-    const contract = new Contract(witnesses);
-    contract.attach(providers, address);
-    return new HelloWorldAPI(contract, address);
+  /**
+   * Store a new message on-chain.
+   * Submits a transaction — requires wallet connection.
+   */
+  async storeMessage(message: string): Promise<{ txId: string }> {
+    const result = await this.foundContract.callTx.storeMessage(message);
+    return { txId: result.public.txId as string };
   }
 
-  /** Call storeMessage() circuit — submits an on-chain transaction */
-  async storeMessage(message: string): Promise<void> {
-    await this.contract.callTx.storeMessage(message);
-  }
-
-  /** Read current ledger state — no transaction, no gas */
+  /**
+   * Read the current on-chain message.
+   * Read-only — no wallet or transaction needed.
+   */
   async readState(): Promise<HelloWorldState> {
-    const state = await this.contract.queryState();
-    return { message: state.message as string | undefined };
+    const { getPublicStates } = await import("@midnight-ntwrk/midnight-js-contracts");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const states = await (getPublicStates as any)(this.foundContract.providers?.publicDataProvider, this.address);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ledger = (states as any).contractState?.data;
+    return { message: ledger?.message ?? undefined };
+  }
+
+  get isConnected(): boolean {
+    return this.foundContract !== null;
   }
 }
 `,
@@ -1206,6 +1267,7 @@ export function buildPackageJson(projectName: string, contractFile: string): Tem
     "typecheck":    "tsc --noEmit"
   },
   "dependencies": {
+    "@midnight-ntwrk/compact-js":                               "4.0.4",
     "@midnight-ntwrk/compact-runtime":                          "0.15.0",
     "@midnight-ntwrk/dapp-connector-api":                       "4.0.1",
     "@midnight-ntwrk/midnight-js-contracts":                    "4.0.4",
@@ -1238,12 +1300,11 @@ export const PROJECT_TSCONFIG: TemplateFile = {
     "esModuleInterop": true,
     "skipLibCheck": true,
     "outDir": "dist",
-    "rootDir": "src",
     "resolveJsonModule": true,
     "declaration": true
   },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist", "generated"]
+  "include": ["src/**/*", "generated/**/*"],
+  "exclude": ["node_modules", "dist"]
 }
 `,
 };
