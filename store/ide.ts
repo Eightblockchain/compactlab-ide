@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { generateId, slugify } from "@/lib/utils";
-import { COMPACT_TEMPLATES, SAMPLE_PROJECTS } from "@/lib/constants";
+import { COMPACT_TEMPLATES, SAMPLE_PROJECTS, PROJECT_BASE_FOLDERS, PROJECT_TSCONFIG, PROJECT_PROVIDERS_TS, buildPackageJson } from "@/lib/constants";
 import { COMPACT_STABLE_VERSION } from "@/lib/version";
 import type { CompactVersion } from "@/lib/version";
 import type { CompileResult, SimulateResult, DeployResult, LogEntry } from "@/lib/compact";
@@ -22,7 +22,7 @@ export interface ProjectFolder {
 export interface ProjectFile {
   id: string;
   name: string;
-  language: "compact" | "markdown" | "json";
+  language: "compact" | "markdown" | "json" | "javascript" | "typescript";
   content: string;
   folderId?: string | null;
   createdAt: number;
@@ -40,6 +40,9 @@ export interface Project {
   activeFileId: string;
   createdAt: number;
   updatedAt: number;
+  // Per-project results — survive project switching and page refresh
+  compileResult?: CompileResult | null;
+  deployResult?: DeployResult | null;
 }
 
 export interface WalletState {
@@ -104,6 +107,7 @@ export interface IDEStore {
   openTab: (fileId: string) => void;
   closeTab: (fileId: string) => void;
   addFile: (name: string, language?: ProjectFile["language"], folderId?: string | null) => ProjectFile | null;
+  upsertGeneratedFiles: (files: Array<{ name: string; language: ProjectFile["language"]; content: string }>) => void;
   deleteFile: (fileId: string) => void;
   addFolder: (name: string, parentId?: string | null) => ProjectFolder | null;
   deleteFolder: (folderId: string) => void;
@@ -128,6 +132,7 @@ export interface IDEStore {
   // Actions — wallet
   connectWallet: () => void;
   disconnectWallet: () => void;
+  setWalletState: (wallet: WalletState) => void;
 
   // Actions — UI
   setRightPanelTab: (tab: PanelTab) => void;
@@ -151,11 +156,50 @@ function buildProject(
   const tpl =
     COMPACT_TEMPLATES[template as keyof typeof COMPACT_TEMPLATES] ??
     COMPACT_TEMPLATES.blank;
-  const files: ProjectFile[] = tpl.files.map((f) => ({
+
+  // ── Folders ───────────────────────────────────────────────────────────────
+  // Merge template-specific folders with the shared base folders.
+  // Base provides: contracts/, src/, generated/.
+  // Template may add more (e.g. test/, scripts/).
+  const allTemplateFolders = [...PROJECT_BASE_FOLDERS, ...(tpl.folders ?? [])];
+  const folderMap = new Map<string, ProjectFolder>();
+  for (const tf of allTemplateFolders) {
+    if (folderMap.has(tf.name)) continue; // dedup
+    const parentId = tf.parentName ? (folderMap.get(tf.parentName)?.id ?? null) : null;
+    const folder: ProjectFolder = { id: generateId(), name: tf.name, parentId, createdAt };
+    folderMap.set(tf.name, folder);
+  }
+
+  // ── Files ─────────────────────────────────────────────────────────────────
+  // Detect the primary .compact filename for package.json compile script.
+  const contractFile =
+    tpl.files.find((f) => f.language === "compact")?.name ?? "contract.compact";
+
+  // Shared base files injected into every project.
+  const baseFiles = [
+    buildPackageJson(slugify(name), contractFile),
+    PROJECT_TSCONFIG,
+    PROJECT_PROVIDERS_TS,
+  ];
+
+  // Merge: base files first, then template files.
+  // Template files override base files with the same (name, folder) key.
+  const allTemplateFiles = [...baseFiles, ...tpl.files];
+  const seen = new Set<string>();
+  const dedupedFiles: typeof tpl.files = [];
+  for (const f of allTemplateFiles) {
+    const key = `${f.folder ?? ""}::${f.name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    dedupedFiles.push(f);
+  }
+
+  const files: ProjectFile[] = dedupedFiles.map((f) => ({
     id: generateId(),
     name: f.name,
     language: f.language,
     content: f.content,
+    folderId: f.folder ? (folderMap.get(f.folder)?.id ?? null) : null,
     createdAt,
     updatedAt,
   }));
@@ -165,7 +209,7 @@ function buildProject(
     slug: slugify(name),
     description,
     template,
-    folders: [],
+    folders: [...folderMap.values()],
     files,
     activeFileId: files[0]?.id ?? "",
     createdAt,
@@ -214,7 +258,7 @@ export const useIDEStore = create<IDEStore>()(
         connected: false,
         address: null,
         balance: null,
-        network: "Midnight Devnet",
+        network: "Midnight Preprod",
       },
 
       compileResult: null,
@@ -286,9 +330,10 @@ export const useIDEStore = create<IDEStore>()(
           code: file?.content ?? "",
           isDirty: false,
           saveStatus: "saved",
-          compileResult: null,
+          // Restore per-project results; clear ephemeral state (logs, simulate)
+          compileResult: project.compileResult ?? null,
           simulateResult: null,
-          deployResult: null,
+          deployResult: project.deployResult ?? null,
           logs: [],
           openTabIds: file ? [file.id] : [],
           tabBuffers: {},
@@ -454,7 +499,7 @@ export const useIDEStore = create<IDEStore>()(
         const { activeProjectId, activeProject, projects, openTabIds, tabBuffers, activeFileId, code } = get();
         if (!activeProjectId || !activeProject) return null;
 
-        const defaultContent: Record<ProjectFile["language"], string> = {
+        const defaultContent: Partial<Record<ProjectFile["language"], string>> = {
           compact: `// ${name}\n\n// Add your circuits here\n`,
           markdown: `# ${name.replace(/\.md$/, "")}\n`,
           json: `{\n}\n`,
@@ -464,7 +509,7 @@ export const useIDEStore = create<IDEStore>()(
           id: generateId(),
           name,
           language,
-          content: defaultContent[language],
+          content: defaultContent[language] ?? `// ${name}\n`,
           folderId: folderId ?? null,
           createdAt: Date.now(),
           updatedAt: Date.now(),
@@ -495,6 +540,46 @@ export const useIDEStore = create<IDEStore>()(
         });
 
         return file;
+      },
+
+      upsertGeneratedFiles: (files) => {
+        const { activeProjectId, activeProject, projects } = get();
+        if (!activeProjectId || !activeProject) return;
+        const now = Date.now();
+
+        // Find or create the "generated" folder at root level
+        let folders = [...(activeProject.folders ?? [])];
+        let genFolder = folders.find((f) => f.name === "generated" && f.parentId === null);
+        if (!genFolder) {
+          genFolder = { id: generateId(), name: "generated", parentId: null, createdAt: now };
+          folders = [...folders, genFolder];
+        }
+        const folderId = genFolder.id;
+
+        // Upsert each file by name within the generated folder
+        let updatedFiles = [...activeProject.files];
+        for (const newFile of files) {
+          const idx = updatedFiles.findIndex((f) => f.name === newFile.name && f.folderId === folderId);
+          if (idx >= 0) {
+            updatedFiles[idx] = { ...updatedFiles[idx], content: newFile.content, updatedAt: now };
+          } else {
+            updatedFiles.push({
+              id: generateId(),
+              name: newFile.name,
+              language: newFile.language,
+              content: newFile.content,
+              folderId,
+              createdAt: now,
+              updatedAt: now,
+            });
+          }
+        }
+
+        const updated: Project = { ...activeProject, folders, files: updatedFiles, updatedAt: now };
+        set({
+          projects: projects.map((p) => (p.id === activeProjectId ? updated : p)),
+          activeProject: updated,
+        });
       },
 
       deleteFile: (fileId) => {
@@ -612,9 +697,33 @@ export const useIDEStore = create<IDEStore>()(
 
       // ── IDE actions ────────────────────────────────────────────────────────
       setStatus: (status) => set({ status }),
-      setCompileResult: (compileResult) => set({ compileResult }),
+      setCompileResult: (compileResult) => {
+        const { activeProjectId, activeProject, projects } = get();
+        if (activeProjectId && activeProject) {
+          const updated = { ...activeProject, compileResult };
+          set({
+            compileResult,
+            activeProject: updated,
+            projects: projects.map((p) => (p.id === activeProjectId ? updated : p)),
+          });
+        } else {
+          set({ compileResult });
+        }
+      },
       setSimulateResult: (simulateResult) => set({ simulateResult }),
-      setDeployResult: (deployResult) => set({ deployResult }),
+      setDeployResult: (deployResult) => {
+        const { activeProjectId, activeProject, projects } = get();
+        if (activeProjectId && activeProject) {
+          const updated = { ...activeProject, deployResult };
+          set({
+            deployResult,
+            activeProject: updated,
+            projects: projects.map((p) => (p.id === activeProjectId ? updated : p)),
+          });
+        } else {
+          set({ deployResult });
+        }
+      },
       setSimulateInputs: (simulateInputs) => set({ simulateInputs }),
       setActiveCircuit: (activeCircuit) => set({ activeCircuit }),
 
@@ -622,24 +731,17 @@ export const useIDEStore = create<IDEStore>()(
         set((s) => ({ logs: [...s.logs.slice(-500), log] })),
       clearLogs: () => set({ logs: [] }),
 
-      connectWallet: () =>
-        set({
-          wallet: {
-            connected: true,
-            address: "0x742d35Cc6634C0532925a3b8D4C9b5A15e8c3a4",
-            balance: "12.847 DUST",
-            network: "Midnight Devnet",
-          },
-        }),
+      connectWallet: () => {/* Use useLaceWallet hook — this is a no-op placeholder */},
       disconnectWallet: () =>
         set({
           wallet: {
             connected: false,
             address: null,
             balance: null,
-            network: "Midnight Devnet",
+            network: "Midnight Preprod",
           },
         }),
+      setWalletState: (wallet) => set({ wallet }),
 
       setRightPanelTab: (rightPanelTab) => set({ rightPanelTab }),
       setLogTab: (logTab) => set({ logTab }),
@@ -651,6 +753,27 @@ export const useIDEStore = create<IDEStore>()(
     }),
     {
       name: "compactlab-v4",
+      version: 3,
+      migrate: (persistedState, fromVersion) => {
+        // v3: rebuild ALL template projects so contracts/ folder is created
+        // (v2 only rebuilt hello-world; v3 rebuilds all template projects)
+        if (fromVersion < 3) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const state = persistedState as any;
+          if (state?.projects) {
+            const now = Date.now();
+            state.projects = state.projects.map((proj: Project) => {
+              if (proj.template) {
+                // Rebuild entirely from the latest template, preserving id/name/description/dates
+                return buildProject(proj.id, proj.name, proj.template, proj.description, proj.createdAt ?? now, now);
+              }
+              return proj;
+            });
+          }
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        return persistedState as any;
+      },
       partialize: (state) => ({
         projects: state.projects,
         activeProjectId: state.activeProjectId,
