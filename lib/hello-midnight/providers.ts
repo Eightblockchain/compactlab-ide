@@ -3,13 +3,13 @@
  *
  * Builds the MidnightProviders bundle from a connected DApp Connector wallet.
  *
- * KEY INSIGHT — Proof server challenge solved:
- * Midnight ZK proofs are local by design. The Lace wallet browser extension
- * runs its own embedded proof server. The DApp delegates proof generation to
- * the wallet via `dappConnectorProofProvider`. No Docker required for users.
+ * ZK proof generation is delegated to a locally running Docker proof server
+ * (midnightntwrk/proof-server, port 6300). Requests are proxied through the
+ * Next.js API routes (/api/proof/check, /api/proof/prove) to avoid CORS.
  *
  * Architecture:
- *   DApp → Lace wallet extension (embedded prover) → Midnight Preprod network
+ *   DApp → Next.js proxy → Docker proof-server:6300 → proof bytes
+ *   DApp → Lace wallet (balanceTx + submitTx only)
  */
 
 import type { WalletConnectedAPI } from "@midnight-ntwrk/dapp-connector-api";
@@ -18,12 +18,11 @@ import {
   SignatureEnabled,
   Proof,
   Binding,
-  CostModel,
 } from "@midnight-ntwrk/ledger-v8";
 import { FetchZkConfigProvider } from "@midnight-ntwrk/midnight-js-fetch-zk-config-provider";
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
-import { dappConnectorProofProvider } from "@midnight-ntwrk/midnight-js-dapp-connector-proof-provider";
+import { makeHttpProofProvider } from "./http-proof-provider";
 import { setNetworkId } from "@midnight-ntwrk/midnight-js-network-id";
 import { toHex, fromHex } from "@midnight-ntwrk/midnight-js-utils";
 import type {
@@ -80,14 +79,10 @@ export async function createHelloWorldProviders(
     (url: string, init?: RequestInit) => window.fetch(url, init),
   );
 
-  // 4. Proof provider — delegates proving to the Lace wallet extension.
-  //    The wallet runs a local prover; no Docker needed for the end user.
-  const costModel = CostModel.initialCostModel();
-  const proofProvider = await dappConnectorProofProvider(
-    wallet,
-    zkConfigProvider,
-    costModel
-  );
+  // 4. Proof provider — delegates proving to the local Docker proof server.
+  //    Requests are proxied via /api/proof/* to avoid CORS.
+  //    Start the server with: docker run -p 6300:6300 midnightntwrk/proof-server
+  const proofProvider = makeHttpProofProvider(zkConfigProvider);
 
   // 5. Public data provider — reads ledger state via Midnight's indexer
   const publicDataProvider = indexerPublicDataProvider(
