@@ -79,19 +79,42 @@ export async function deployPlaygroundContract(
   log("info", "Connecting to Midnight Preprod…");
   log("info", `Indexer: ${PREPROD_CONFIG.indexerUri}`);
 
-  // `connectedAPI` (ConnectedAPI) is structurally compatible with WalletConnectedAPI
-  // — the same pattern is used in HelloMidnightApp.tsx without a cast.
-  const providers = await createHelloWorldProviders(
-    connectedAPI as Parameters<typeof createHelloWorldProviders>[0],
-    PREPROD_CONFIG,
-  );
+  let providers: Awaited<ReturnType<typeof createHelloWorldProviders>>;
+  try {
+    providers = await createHelloWorldProviders(
+      connectedAPI as Parameters<typeof createHelloWorldProviders>[0],
+      PREPROD_CONFIG,
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log("error", `Failed to initialise providers: ${msg}`);
+    if (msg.toLowerCase().includes("proving") || msg.toLowerCase().includes("prover")) {
+      log("warn", "Your wallet may not support getProvingProvider. Make sure you are using Midnight Lace and have accepted the connection.");
+    }
+    return { success: false, duration: Date.now() - t0, error: `Provider setup failed: ${msg}` };
+  }
 
   // ── Deploy ────────────────────────────────────────────────────────────────────
   log("info", "Providers ready. Submitting deploy transaction…");
-  log("info", "⏳ First deploy may take 1–2 minutes — the Lace wallet is generating ZK proofs locally.");
+  log("info", "⏳ First deploy may take 1–2 minutes — the wallet is generating ZK proofs locally.");
 
   const api = new HelloMidnightAPI(providers);
-  const { contractAddress } = await api.deploy();
+
+  let contractAddress: Awaited<ReturnType<typeof api.deploy>>["contractAddress"];
+  try {
+    ({ contractAddress } = await api.deploy());
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    log("error", `Deploy transaction failed: ${msg}`);
+    if (msg.includes("verifier key") || msg.includes("prover key") || msg.includes("zkir")) {
+      log("warn", "ZK asset fetch failed. Expected files at /contracts/hello-world/keys/ and /contracts/hello-world/zkir/.");
+      log("warn", "Make sure the Next.js dev server is running on localhost:3000 and the /public/contracts/ directory is present.");
+    }
+    if (msg.includes("user") || msg.toLowerCase().includes("cancel") || msg.toLowerCase().includes("reject")) {
+      log("warn", "It looks like the wallet request was rejected. Open Lace and approve the transaction.");
+    }
+    return { success: false, duration: Date.now() - t0, error: msg };
+  }
 
   const duration = Date.now() - t0;
   const addr = String(contractAddress);

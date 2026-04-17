@@ -316,6 +316,12 @@ function NetworkPanel() {
               <span className="ml-auto text-xs text-text-muted">{deployResult.duration}ms</span>
             </div>
 
+            {!deployResult.success && deployResult.error && (
+              <div className="mt-1 p-2 bg-error/5 border border-error/15 rounded text-xs font-mono text-error/90 break-all select-text">
+                {deployResult.error}
+              </div>
+            )}
+
             {deployResult.contractAddress && (
               <div>
                 <p className="text-2xs text-text-muted mb-1">Contract Address</p>
