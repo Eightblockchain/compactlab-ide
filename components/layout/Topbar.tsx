@@ -2,16 +2,17 @@
 
 import { useIDEStore } from "@/store/ide";
 import { Button, StatusDot, Divider } from "@/components/ui";
-import { cn, formatAddress } from "@/lib/utils";
-import { mockCompile, mockDeploy } from "@/lib/compact";
-import { useState, useRef } from "react";
+import { cn, formatAddress, generateId } from "@/lib/utils";
+import { mockDeploy } from "@/lib/compact";
+import { useState, useRef, useEffect } from "react";
+import { useLaceWallet } from "@/hooks/useLaceWallet";
+import type { CompileResult } from "@/lib/compact";
 
 export function Topbar() {
   const {
     activeProject,
     saveStatus,
     status,
-    wallet,
     code,
     setStatus,
     setCompileResult,
@@ -20,11 +21,32 @@ export function Topbar() {
     clearLogs,
     setLogTab,
     setBottomPanelOpen,
-    connectWallet,
-    disconnectWallet,
+    setWalletState,
     renameProject,
     setRightPanelTab,
+    upsertGeneratedFiles,
   } = useIDEStore();
+
+  const lace = useLaceWallet();
+
+  // Sync Lace wallet state into the IDE store
+  useEffect(() => {
+    if (lace.status === "connected" && lace.walletInfo) {
+      setWalletState({
+        connected: true,
+        address: lace.walletInfo.unshieldedAddress,
+        balance: null,
+        network: "Midnight Preprod",
+      });
+    } else if (lace.status === "disconnected" || lace.status === "error") {
+      setWalletState({
+        connected: false,
+        address: null,
+        balance: null,
+        network: "Midnight Preprod",
+      });
+    }
+  }, [lace.status, lace.walletInfo, setWalletState]);
 
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState("");
@@ -38,32 +60,98 @@ export function Topbar() {
     setCompileResult(null);
     setStatus("compiling");
 
-    const result = await mockCompile(code, addLog);
-    setCompileResult(result);
+    addLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Starting compilation...", source: "compiler" });
+
+    try {
+      const res = await fetch("/api/compile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      const result = await res.json() as CompileResult & { mock?: boolean; compilerVersion?: string; generatedFiles?: Array<{ name: string; language: "json" | "javascript" | "typescript"; content: string }> };
+
+      if (result.success) {
+        const circuitCount = result.circuitMetadata?.length ?? 0;
+        const versionTag = result.compilerVersion ? ` (compact ${result.compilerVersion})` : result.mock ? " (mock)" : "";
+        addLog({ id: generateId(), timestamp: Date.now(), level: "success", message: `Compilation successful${versionTag} — ${circuitCount} circuit(s) in ${result.duration}ms`, source: "compiler" });
+        result.warnings?.forEach((w) => {
+          addLog({ id: generateId(), timestamp: Date.now(), level: "warn", message: w, source: "compiler" });
+        });
+        result.circuitMetadata?.forEach((c) => {
+          const params = c.inputs.map((i) => `${i.name}: ${i.type}`).join(", ");
+          addLog({ id: generateId(), timestamp: Date.now(), level: "info", message: `  circuit ${c.name}(${params}) → ${c.output}`, source: "compiler" });
+        });
+        // Add/update generated files in the project tree
+        if (result.generatedFiles && result.generatedFiles.length > 0) {
+          upsertGeneratedFiles(result.generatedFiles);
+          addLog({ id: generateId(), timestamp: Date.now(), level: "info", message: `  Generated ${result.generatedFiles.length} file(s) in generated/`, source: "compiler" });
+        }
+      } else {
+        addLog({ id: generateId(), timestamp: Date.now(), level: "error", message: "Compilation failed", source: "compiler" });
+        result.errors?.forEach((e) => {
+          addLog({ id: generateId(), timestamp: Date.now(), level: "error", message: `  Line ${e.line}, Col ${e.column}: ${e.message}`, source: "compiler" });
+        });
+      }
+
+      setCompileResult(result);
+    } catch {
+      addLog({ id: generateId(), timestamp: Date.now(), level: "error", message: "Compilation failed: could not reach compile service", source: "compiler" });
+    }
+
     setStatus("idle");
   };
 
   const handleDeploy = async () => {
     if (status !== "idle") return;
-    if (!wallet.connected) {
-      connectWallet();
+
+    // Require Lace wallet
+    if (lace.status !== "connected") {
+      clearLogs();
+      setLogTab("network");
+      setBottomPanelOpen(true);
+      if (!lace.isInstalled) {
+        addLog({ id: generateId(), timestamp: Date.now(), level: "warn", message: "Midnight Lace wallet not detected. Install it from midnight.network/lace", source: "network" });
+      } else {
+        addLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Connecting to Lace wallet...", source: "network" });
+        await lace.connect();
+      }
       return;
     }
 
-    // First compile
+    // Compile first
     clearLogs();
     setLogTab("compile");
     setBottomPanelOpen(true);
     setStatus("compiling");
-    const compileResult = await mockCompile(code, addLog);
-    setCompileResult(compileResult);
+    addLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Starting compilation...", source: "compiler" });
 
-    if (!compileResult.success) {
+    let compileResult: (CompileResult & { mock?: boolean }) | null = null;
+    try {
+      const res = await fetch("/api/compile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      compileResult = await res.json() as CompileResult & { mock?: boolean };
+      setCompileResult(compileResult);
+    } catch {
+      addLog({ id: generateId(), timestamp: Date.now(), level: "error", message: "Compilation failed: could not reach compile service", source: "compiler" });
       setStatus("idle");
       return;
     }
 
-    // Then deploy
+    if (!compileResult?.success) {
+      compileResult?.errors?.forEach((e) => {
+        addLog({ id: generateId(), timestamp: Date.now(), level: "error", message: `  Line ${e.line}: ${e.message}`, source: "compiler" });
+      });
+      addLog({ id: generateId(), timestamp: Date.now(), level: "error", message: "Fix compilation errors before deploying", source: "compiler" });
+      setStatus("idle");
+      return;
+    }
+
+    addLog({ id: generateId(), timestamp: Date.now(), level: "success", message: "Compilation successful", source: "compiler" });
+
+    // Deploy
     setLogTab("network");
     setStatus("deploying");
     const deployResult = await mockDeploy(addLog);
@@ -210,25 +298,46 @@ export function Topbar() {
         <Divider vertical className="mx-1 h-5" />
 
         {/* Wallet */}
-        {wallet.connected ? (
+        {lace.status === "connected" && lace.walletInfo ? (
           <button
-            onClick={disconnectWallet}
+            onClick={lace.disconnect}
             className={cn(
               "flex items-center gap-1.5 rounded px-2.5 py-1.5 h-7",
               "border border-success/20 bg-success/8 text-success text-sm font-medium",
               "hover:bg-success/12 transition-colors"
             )}
+            title="Connected to Lace — click to disconnect"
           >
             <span className="w-1.5 h-1.5 rounded-full bg-success" />
-            {wallet.address ? formatAddress(wallet.address) : "Connected"}
+            {formatAddress(lace.walletInfo.unshieldedAddress)}
+          </button>
+        ) : lace.status === "error" ? (
+          <button
+            onClick={lace.connect}
+            className={cn(
+              "flex items-center gap-1.5 rounded px-2.5 py-1.5 h-7",
+              "border border-error/30 bg-error/8 text-error text-sm font-medium",
+              "hover:bg-error/12 transition-colors"
+            )}
+            title={lace.error ?? "Wallet error — click to retry"}
+          >
+            <span className="w-1.5 h-1.5 rounded-full bg-error" />
+            Retry
           </button>
         ) : (
-          <Button variant="default" size="md" onClick={connectWallet} className="gap-1.5">
+          <Button
+            variant="default"
+            size="md"
+            onClick={lace.isInstalled ? lace.connect : () => window.open("https://midnight.network/lace", "_blank")}
+            loading={lace.status === "connecting"}
+            disabled={lace.status === "connecting"}
+            className="gap-1.5"
+          >
             <svg className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4">
               <rect x="1" y="4" width="12" height="8" rx="1.5" />
               <path d="M1 7h12M10 8.5h.5" strokeLinecap="round" />
             </svg>
-            Connect Wallet
+            {!lace.isInstalled ? "Install Lace" : lace.status === "connecting" ? "Connecting…" : "Connect Wallet"}
           </Button>
         )}
       </div>
