@@ -13,10 +13,19 @@ export type TemplateKey =
   | "commitment"
   | "blank";
 
+export interface TemplateFolder {
+  /** Unique key within this template — also used as display name */
+  name: string;
+  /** Parent folder name, or null for root */
+  parentName: string | null;
+}
+
 export interface TemplateFile {
   name: string;
-  language: "compact" | "markdown" | "json";
+  language: "compact" | "markdown" | "json" | "javascript" | "typescript";
   content: string;
+  /** Must match a TemplateFolder.name, or omit for root */
+  folder?: string;
 }
 
 export interface CompactTemplate {
@@ -24,6 +33,7 @@ export interface CompactTemplate {
   description: string;
   difficulty: "beginner" | "intermediate" | "advanced";
   tags: string[];
+  folders?: TemplateFolder[];
   files: TemplateFile[];
 }
 
@@ -34,10 +44,13 @@ export const COMPACT_TEMPLATES: Record<TemplateKey, CompactTemplate> = {
     description: "Store a public message on-chain — the simplest Compact contract",
     difficulty: "beginner",
     tags: ["Opaque<string>", "disclose", "ledger"],
+    // Note: contracts/, src/, generated/ are injected by buildProject automatically.
+    // Add extra folders here only if this template needs them.
     files: [
       {
         name: "hello-world.compact",
         language: "compact",
+        folder: "contracts",
         content: `pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
@@ -47,17 +60,14 @@ import CompactStandardLibrary;
 // Concepts covered:
 //  - Opaque<"string">: how Compact handles string values
 //  - export ledger: public on-chain state readable by anyone
-//  - constructor(): runs at deploy time, NOT a ZK circuit
 //  - export circuit: a callable ZK-proven state transition
 //  - disclose(): required when writing circuit parameters to the ledger
+//
+// Note: Opaque<"string"> cannot be initialised in a constructor with a
+// string literal (literals are Bytes<N>, which is a different type).
+// The field starts empty and is set via the first storeMessage() call.
 
 export ledger message: Opaque<"string">;
-
-constructor() {
-  // Initial message set at deploy time.
-  // In a constructor, string literals can be written to the ledger directly.
-  message = "Hello, Midnight!";
-}
 
 // Update the message. Anyone can call this.
 // newMessage is a circuit parameter — disclose() is required to write it
@@ -68,28 +78,146 @@ export circuit storeMessage(newMessage: Opaque<"string">): [] {
 `,
       },
       {
+        name: "api.ts",
+        language: "typescript",
+        folder: "src",
+        content: `/**
+ * api.ts — Hello World contract API
+ *
+ * High-level typed wrapper around the compiled contract.
+ * Run "Compile" first — generated/contract/index.d.ts must exist.
+ */
+
+// After compiling, uncomment to get full type safety:
+// import type { HelloWorldContract } from "../generated/contract/index.js";
+
+import { Contract, witnesses } from "@midnight-ntwrk/midnight-js-contracts";
+import type { MidnightProvider, ContractAddress } from "@midnight-ntwrk/midnight-js-types";
+import type { createProviders } from "./providers.js";
+
+/** Mirrors the Compact ledger state */
+export interface HelloWorldState {
+  /** The on-chain message. Undefined until storeMessage() is first called. */
+  message: string | undefined;
+}
+
+export class HelloWorldAPI {
+  private constructor(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    private readonly contract: Contract<any>,
+    public readonly address: ContractAddress,
+  ) {}
+
+  /**
+   * Deploy a brand-new Hello World contract.
+   * Requires a connected Lace wallet with tDUST on Preprod.
+   * Get tDUST: https://faucet.preprod.midnight.network/
+   */
+  static async deploy(
+    providers: Awaited<ReturnType<typeof createProviders>>,
+  ): Promise<HelloWorldAPI> {
+    const contract = new Contract(witnesses);
+    const { deployTxData } = await contract.deploy(providers, {
+      privateStateKey: "hello-world",
+      initialPrivateState: {},
+    });
+    return new HelloWorldAPI(contract, deployTxData.public.contractAddress);
+  }
+
+  /** Join an existing deployed contract by address */
+  static join(
+    providers: Awaited<ReturnType<typeof createProviders>>,
+    address: ContractAddress,
+  ): HelloWorldAPI {
+    const contract = new Contract(witnesses);
+    contract.attach(providers, address);
+    return new HelloWorldAPI(contract, address);
+  }
+
+  /** Call storeMessage() circuit — submits an on-chain transaction */
+  async storeMessage(message: string): Promise<void> {
+    await this.contract.callTx.storeMessage(message);
+  }
+
+  /** Read current ledger state — no transaction, no gas */
+  async readState(): Promise<HelloWorldState> {
+    const state = await this.contract.queryState();
+    return { message: state.message as string | undefined };
+  }
+}
+`,
+      },
+      {
         name: "README.md",
         language: "markdown",
         content: `# Hello World
 
-The simplest possible Compact contract: store a public message on-chain.
+The simplest Midnight DApp: store a public message on-chain using a ZK contract.
 
-## Concepts
+## Project structure
+
+\`\`\`
+hello-world/
+├── contracts/
+│   └── hello-world.compact  ← Compact ZK contract
+├── src/
+│   ├── providers.ts          ← SDK provider wiring (shared across all projects)
+│   └── api.ts                ← Typed contract API (deploy, call, read)
+├── generated/                ← Created by Compile — do not edit manually
+│   ├── contract-info.json    ← Circuit names, argument types, versions
+│   ├── index.js              ← Compiled JS contract module
+│   └── index.d.ts            ← TypeScript declarations (type-safe API)
+├── package.json              ← Midnight SDK dependencies
+└── tsconfig.json             ← TypeScript config
+\`\`\`
+
+## Workflow
+
+\`\`\`bash
+# 1. Install dependencies
+npm install
+
+# 2. Compile the contract (requires compact CLI)
+npm run compile
+# → generates TypeScript bindings in generated/
+
+# 3. Type-check
+npm run typecheck
+
+# 4. Deploy (requires Midnight Lace wallet + tDUST on Preprod)
+#    See src/api.ts — HelloWorldAPI.deploy(providers)
+\`\`\`
+
+## Compact concepts
 
 | Concept | Code |
 |---|---|
-| String type | \`Opaque<"string">\` |
-| Public state | \`export ledger message: Opaque<"string">;\` |
-| Deploy-time init | \`constructor() { message = "Hello, Midnight!"; }\` |
-| ZK circuit | \`export circuit storeMessage(...): [] { ... }\` |
+| Public string type | \`Opaque<"string">\` |
+| Public on-chain state | \`export ledger message: Opaque<"string">;\` |
+| ZK circuit (state transition) | \`export circuit storeMessage(...): []\` |
 | Explicit disclosure | \`message = disclose(newMessage);\` |
+
+## Why no constructor?
+
+\`Opaque<"string">\` cannot be set from a string literal — literals are
+\`Bytes<N>\`, a different type. The field starts unset; call \`storeMessage()\`
+after deploying to initialise it.
 
 ## Why \`disclose()\`?
 
-Compact's compiler tracks data provenance. Any value that enters a circuit
-from the outside (a parameter or a witness) is treated as potentially
-private until you explicitly call \`disclose()\` on it. This prevents
-accidental data leaks — if you forget, the compiler refuses to compile.
+Compact tracks data provenance. Circuit parameters are treated as potentially
+private until explicitly disclosed. \`disclose()\` tells the compiler
+"this value is intentionally public". Without it, the compiler rejects writes
+to the ledger from a parameter — protecting against accidental data leaks.
+
+## Preprod network
+
+| | URL |
+|---|---|
+| Indexer | \`https://indexer.preprod.midnight.network/api/v3/graphql\` |
+| Node RPC | \`wss://rpc.preprod.midnight.network\` |
+| Faucet (tDUST) | \`https://faucet.preprod.midnight.network/\` |
+| Lace wallet | \`https://midnight.network/lace\` |
 `,
       },
     ],
@@ -105,6 +233,7 @@ accidental data leaks — if you forget, the compiler refuses to compile.
       {
         name: "counter.compact",
         language: "compact",
+        folder: "contracts",
         content: `pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
@@ -169,6 +298,7 @@ An on-chain counter backed by Compact's built-in \`Counter\` ledger type.
       {
         name: "voting.compact",
         language: "compact",
+        folder: "contracts",
         content: `pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
@@ -276,6 +406,7 @@ The choice itself never appears in the proof transcript.
       {
         name: "bulletin-board.compact",
         language: "compact",
+        folder: "contracts",
         content: `pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
@@ -376,6 +507,7 @@ The secret never leaves the proof generation step.
       {
         name: "owned.compact",
         language: "compact",
+        folder: "contracts",
         content: `pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
@@ -469,6 +601,7 @@ Demonstrates the standard admin ownership pattern in Compact.
       {
         name: "token.compact",
         language: "compact",
+        folder: "contracts",
         content: `pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
@@ -576,6 +709,7 @@ An ERC-20 style token with public balances stored in a \`Map\`.
       {
         name: "registry.compact",
         language: "compact",
+        folder: "contracts",
         content: `pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
@@ -659,6 +793,7 @@ In Compact itself, use: \`pad(32, "literal-string")\`.
       {
         name: "profile.compact",
         language: "compact",
+        folder: "contracts",
         content: `pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
@@ -782,6 +917,7 @@ profiles.insert(disclose(caller), disclose(PlayerProfile {
       {
         name: "escrow.compact",
         language: "compact",
+        folder: "contracts",
         content: `pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
@@ -890,6 +1026,7 @@ parameters or witnesses need the explicit \`disclose()\` annotation.
       {
         name: "commitment.compact",
         language: "compact",
+        folder: "contracts",
         content: `pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
@@ -996,6 +1133,7 @@ The foundational ZK primitive: prove you know a secret without revealing it.
       {
         name: "contract.compact",
         language: "compact",
+        folder: "contracts",
         content: `pragma language_version >= 0.20;
 
 import CompactStandardLibrary;
@@ -1044,6 +1182,146 @@ constructor() {
   },
 };
 
+// ─── Shared project scaffold ───────────────────────────────────────────────────
+// Every template gets these folders and files injected by buildProject.
+// Contracts always live in contracts/, output in generated/, TypeScript in src/.
+
+export const PROJECT_BASE_FOLDERS: TemplateFolder[] = [
+  { name: "contracts", parentName: null },
+  { name: "src",       parentName: null },
+  { name: "generated", parentName: null },
+];
+
+export function buildPackageJson(projectName: string, contractFile: string): TemplateFile {
+  return {
+    name: "package.json",
+    language: "json",
+    content: `{
+  "name": "${projectName}",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "compile":      "compact compile +0.30.0 contracts/${contractFile} ./generated",
+    "typecheck":    "tsc --noEmit"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/compact-runtime":                          "0.15.0",
+    "@midnight-ntwrk/dapp-connector-api":                       "4.0.1",
+    "@midnight-ntwrk/midnight-js-contracts":                    "4.0.4",
+    "@midnight-ntwrk/midnight-js-dapp-connector-proof-provider":"4.0.4",
+    "@midnight-ntwrk/midnight-js-fetch-zk-config-provider":     "4.0.4",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "4.0.4",
+    "@midnight-ntwrk/midnight-js-level-private-state-provider": "4.0.4",
+    "@midnight-ntwrk/midnight-js-network-id":                   "4.0.4",
+    "@midnight-ntwrk/midnight-js-types":                        "4.0.4",
+    "@midnight-ntwrk/midnight-js-utils":                        "4.0.4",
+    "rxjs": "^7.8.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0"
+  }
+}
+`,
+  };
+}
+
+export const PROJECT_TSCONFIG: TemplateFile = {
+  name: "tsconfig.json",
+  language: "json",
+  content: `{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "resolveJsonModule": true,
+    "declaration": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "generated"]
+}
+`,
+};
+
+export const PROJECT_PROVIDERS_TS: TemplateFile = {
+  name: "providers.ts",
+  language: "typescript",
+  folder: "src",
+  content: `/**
+ * providers.ts — Midnight SDK provider wiring
+ *
+ * Each provider has a single responsibility:
+ *   proofProvider       → ZK proof generation (via Lace wallet)
+ *   publicDataProvider  → reads public ledger state from the indexer
+ *   walletProvider      → signs and submits transactions
+ *   zkConfigProvider    → fetches proving/verifying keys
+ *   privateStateProvider→ stores encrypted private state locally (IndexedDB)
+ */
+
+import { createDAppConnectorProofProvider }    from "@midnight-ntwrk/midnight-js-dapp-connector-proof-provider";
+import { indexerPublicDataProvider }            from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
+import { levelPrivateStateProvider }            from "@midnight-ntwrk/midnight-js-level-private-state-provider";
+import { fetchZkConfigProvider }                from "@midnight-ntwrk/midnight-js-fetch-zk-config-provider";
+import { setNetworkId, NetworkId }              from "@midnight-ntwrk/midnight-js-network-id";
+import type { MidnightProvider }                from "@midnight-ntwrk/midnight-js-types";
+import type { DAppConnectorWalletAPI }          from "@midnight-ntwrk/dapp-connector-api";
+
+// ─── Preprod network endpoints ────────────────────────────────────────────────
+
+export const NETWORK_CONFIG = {
+  indexer:    "https://indexer.preprod.midnight.network/api/v3/graphql",
+  indexerWS:  "wss://indexer.preprod.midnight.network/api/v3/graphql/ws",
+  node:       "wss://rpc.preprod.midnight.network",
+  networkId:  NetworkId.TestNet,
+  faucet:     "https://faucet.preprod.midnight.network/",
+} as const;
+
+// ─── Provider factory ─────────────────────────────────────────────────────────
+
+/**
+ * Build the full provider bundle needed to deploy and call circuits.
+ *
+ * @param walletAPI  Lace wallet API from: await window.midnight.mnLace.enable("preprod")
+ * @param storeName  Unique key for IndexedDB private-state storage
+ */
+export async function createProviders(
+  walletAPI: DAppConnectorWalletAPI,
+  storeName: string,
+): Promise<MidnightProvider> {
+  setNetworkId(NETWORK_CONFIG.networkId);
+
+  return {
+    proofProvider: createDAppConnectorProofProvider(walletAPI),
+
+    publicDataProvider: indexerPublicDataProvider(
+      NETWORK_CONFIG.indexer,
+      NETWORK_CONFIG.indexerWS,
+    ),
+
+    // Encrypted private state is stored in the browser's IndexedDB.
+    // Use a unique storeName per contract instance.
+    privateStateProvider: levelPrivateStateProvider({
+      privateStateStoreName: storeName,
+    }),
+
+    // Serving ZK keys from /public/contracts/ (Next.js static folder).
+    // For a standalone Node.js app, replace with a file:// URL or CDN.
+    zkConfigProvider: fetchZkConfigProvider(
+      typeof window !== "undefined" ? window.location.origin : "http://localhost:3000",
+      fetch.bind(globalThis),
+    ),
+
+    walletProvider: walletAPI,
+  };
+}
+`,
+};
+
 // ─── Pre-loaded sample projects (beginner-friendly only) ──────────────────────
 
 export const SAMPLE_PROJECTS: Array<{
@@ -1076,9 +1354,3 @@ export const SAMPLE_PROJECTS: Array<{
   },
 ];
 
-export const MOCK_WALLET = {
-  address: "0x742d35Cc6634C0532925a3b8D4C9b5A15e8c3a4",
-  balance: "12.847 DUST",
-  network: "Midnight Devnet",
-  connected: false,
-};
