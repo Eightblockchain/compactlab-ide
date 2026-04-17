@@ -33,8 +33,8 @@ export interface UseLaceWalletReturn {
   connectedAPI: ConnectedAPI | null;
   /** Wallet addresses (available when status === 'connected') */
   walletInfo: WalletInfo | null;
-  /** Connect to the Lace wallet */
-  connect: () => Promise<void>;
+  /** Connect to the Lace wallet. Returns the ConnectedAPI on success, null on failure. */
+  connect: () => Promise<ConnectedAPI | null>;
   /** Disconnect from the wallet */
   disconnect: () => void;
 }
@@ -46,29 +46,40 @@ export function useLaceWallet(): UseLaceWalletReturn {
   const [connectedAPI, setConnectedAPI] = useState<ConnectedAPI | null>(null);
   const [walletInfo, setWalletInfo] = useState<WalletInfo | null>(null);
 
-  // Detect wallet on mount (window is not available during SSR)
+  // Detect wallet on mount — retry for up to 5 seconds because some extensions
+  // inject into window.midnight after the React tree has already mounted.
   useEffect(() => {
+    let attempts = 0;
+    const MAX_ATTEMPTS = 10;
+    let timer: ReturnType<typeof setTimeout>;
+
     const checkWallet = () => {
       const wallet = (window as WindowWithMidnight).midnight?.mnLace;
-      setIsInstalled(!!wallet);
+      if (wallet) {
+        setIsInstalled(true);
+        return;
+      }
+      attempts++;
+      if (attempts < MAX_ATTEMPTS) {
+        timer = setTimeout(checkWallet, 500);
+      }
     };
 
     checkWallet();
-
-    // Re-check if the wallet injects itself after page load
-    const timer = setTimeout(checkWallet, 1000);
     return () => clearTimeout(timer);
   }, []);
 
-  const connect = useCallback(async () => {
+  const connect = useCallback(async (): Promise<ConnectedAPI | null> => {
     setStatus("connecting");
     setError(null);
 
     try {
+      // Re-check at call time — don't rely on the isInstalled state which may
+      // be stale if the extension injected after the initial detection runs.
       const wallet = (window as WindowWithMidnight).midnight?.mnLace;
       if (!wallet) {
         throw new Error(
-          "Lace wallet extension not found. Please install the Midnight Lace wallet."
+          "Lace wallet extension not found. Make sure the Midnight Lace wallet is installed and enabled, then try again."
         );
       }
 
@@ -87,10 +98,13 @@ export function useLaceWallet(): UseLaceWalletReturn {
         unshieldedAddress,
       });
       setStatus("connected");
+      setIsInstalled(true);
+      return api;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
       setStatus("error");
+      return null;
     }
   }, []);
 

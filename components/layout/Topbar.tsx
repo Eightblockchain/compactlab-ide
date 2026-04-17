@@ -104,24 +104,27 @@ export function Topbar() {
   const handleDeploy = async () => {
     if (status !== "idle") return;
 
-    // Require Lace wallet
-    if (lace.status !== "connected") {
-      clearLogs();
+    clearLogs();
+    setBottomPanelOpen(true);
+
+    // ── Step 1: Get or connect the wallet ────────────────────────────────────
+    // connect() re-checks window.midnight.mnLace at call time so it works even
+    // if the extension injected after our mount-time detection ran.
+    let connectedAPI = lace.connectedAPI;
+    if (!connectedAPI) {
       setLogTab("network");
-      setBottomPanelOpen(true);
-      if (!lace.isInstalled) {
-        addLog({ id: generateId(), timestamp: Date.now(), level: "warn", message: "Midnight Lace wallet not detected. Install it from midnight.network/lace", source: "network" });
-      } else {
-        addLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Connecting to Lace wallet...", source: "network" });
-        await lace.connect();
+      addLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Connecting to Lace wallet…", source: "network" });
+      connectedAPI = await lace.connect();
+      if (!connectedAPI) {
+        // connect() already set lace.error; the topbar will show "Retry"
+        addLog({ id: generateId(), timestamp: Date.now(), level: "error", message: lace.error ?? "Could not connect to Lace wallet. Make sure the extension is installed and enabled.", source: "network" });
+        return;
       }
-      return;
+      addLog({ id: generateId(), timestamp: Date.now(), level: "success", message: "Wallet connected.", source: "network" });
     }
 
-    // Compile first
-    clearLogs();
+    // ── Step 2: Compile ────────────────────────────────────────────────────────
     setLogTab("compile");
-    setBottomPanelOpen(true);
     setStatus("compiling");
     addLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Starting compilation...", source: "compiler" });
 
@@ -151,14 +154,14 @@ export function Topbar() {
 
     addLog({ id: generateId(), timestamp: Date.now(), level: "success", message: "Compilation successful", source: "compiler" });
 
-    // Deploy — runs entirely in the browser via Lace wallet
+    // ── Step 3: Deploy ─────────────────────────────────────────────────────────
     setLogTab("network");
     setStatus("deploying");
 
     let deployResult: DeployResult;
     try {
       deployResult = await deployPlaygroundContract(
-        lace.connectedAPI!,
+        connectedAPI,
         activeProject?.template ?? "",
         addLog,
       );
