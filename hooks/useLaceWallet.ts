@@ -23,7 +23,7 @@ import type {
 import type { ConnectionStatus, WalletInfo } from "@/lib/hello-midnight/types";
 
 export interface UseLaceWalletReturn {
-  /** Whether the Lace wallet extension is installed */
+  /** Whether any Midnight wallet extension is installed */
   isInstalled: boolean;
   /** Current connection status */
   status: ConnectionStatus;
@@ -33,10 +33,18 @@ export interface UseLaceWalletReturn {
   connectedAPI: ConnectedAPI | null;
   /** Wallet addresses (available when status === 'connected') */
   walletInfo: WalletInfo | null;
-  /** Connect to the Lace wallet. Returns the ConnectedAPI on success, null on failure. */
+  /** Connect to the wallet. Returns the ConnectedAPI on success, null on failure. */
   connect: () => Promise<ConnectedAPI | null>;
   /** Disconnect from the wallet */
   disconnect: () => void;
+}
+
+/** Returns the first available Midnight wallet from window.midnight, or null. */
+function detectWallet(): InitialAPI | null {
+  const midnight = (window as Window).midnight;
+  if (!midnight) return null;
+  const wallets = Object.values(midnight);
+  return wallets.length > 0 ? wallets[0] ?? null : null;
 }
 
 export function useLaceWallet(): UseLaceWalletReturn {
@@ -46,16 +54,15 @@ export function useLaceWallet(): UseLaceWalletReturn {
   const [connectedAPI, setConnectedAPI] = useState<ConnectedAPI | null>(null);
   const [walletInfo, setWalletInfo] = useState<WalletInfo | null>(null);
 
-  // Detect wallet on mount — retry for up to 5 seconds because some extensions
-  // inject into window.midnight after the React tree has already mounted.
+  // Retry detection up to 10 times × 500 ms (5 s) — extensions often inject
+  // into window.midnight a few hundred ms after the React tree mounts.
   useEffect(() => {
     let attempts = 0;
     const MAX_ATTEMPTS = 10;
     let timer: ReturnType<typeof setTimeout>;
 
     const checkWallet = () => {
-      const wallet = (window as WindowWithMidnight).midnight?.mnLace;
-      if (wallet) {
+      if (detectWallet()) {
         setIsInstalled(true);
         return;
       }
@@ -74,19 +81,16 @@ export function useLaceWallet(): UseLaceWalletReturn {
     setError(null);
 
     try {
-      // Re-check at call time — don't rely on the isInstalled state which may
-      // be stale if the extension injected after the initial detection runs.
-      const wallet = (window as WindowWithMidnight).midnight?.mnLace;
+      // Re-read window.midnight at call time — don't rely on cached isInstalled.
+      const wallet = detectWallet();
       if (!wallet) {
         throw new Error(
-          "Lace wallet extension not found. Make sure the Midnight Lace wallet is installed and enabled, then try again."
+          "No Midnight wallet extension found. Make sure the Midnight Lace wallet is installed and enabled, then try again."
         );
       }
 
-      // Connect to Preprod network — this will prompt the user in the wallet extension
       const api: ConnectedAPI = await wallet.connect("preprod");
 
-      // Fetch wallet addresses for display + provider setup
       const addresses = await api.getShieldedAddresses();
       const { unshieldedAddress } = await api.getUnshieldedAddress();
 
@@ -123,13 +127,5 @@ export function useLaceWallet(): UseLaceWalletReturn {
     walletInfo,
     connect,
     disconnect,
-  };
-}
-
-// ─── Types for window.midnight ───────────────────────────────────────────────
-
-interface WindowWithMidnight {
-  midnight?: {
-    mnLace?: InitialAPI;
   };
 }

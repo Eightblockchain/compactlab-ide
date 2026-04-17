@@ -344,7 +344,7 @@ export function Topbar() {
           <Button
             variant="default"
             size="md"
-            onClick={lace.isInstalled ? lace.connect : () => window.open("https://midnight.network/lace", "_blank")}
+            onClick={lace.isInstalled ? lace.connect : () => window.open("https://lace.io", "_blank")}
             loading={lace.status === "connecting"}
             disabled={lace.status === "connecting"}
             className="gap-1.5"
