@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { generateId, slugify } from "@/lib/utils";
-import { COMPACT_TEMPLATES, SAMPLE_PROJECTS, PROJECT_BASE_FOLDERS, PROJECT_TSCONFIG, PROJECT_PROVIDERS_TS, buildPackageJson } from "@/lib/constants";
+import { COMPACT_TEMPLATES, SAMPLE_PROJECTS, PROJECT_BASE_FOLDERS, PROJECT_TSCONFIG, PROJECT_PROVIDERS_TS, PROJECT_DOCKER_COMPOSE, PROJECT_DEPLOYMENT_JSON, buildPackageJson } from "@/lib/constants";
 import { COMPACT_STABLE_VERSION } from "@/lib/version";
 import type { CompactVersion } from "@/lib/version";
 import type { CompileResult, SimulateResult, DeployResult, LogEntry } from "@/lib/compact";
@@ -22,7 +22,7 @@ export interface ProjectFolder {
 export interface ProjectFile {
   id: string;
   name: string;
-  language: "compact" | "markdown" | "json" | "javascript" | "typescript";
+  language: "compact" | "markdown" | "json" | "javascript" | "typescript" | "yaml";
   content: string;
   folderId?: string | null;
   createdAt: number;
@@ -180,6 +180,8 @@ function buildProject(
     buildPackageJson(slugify(name), contractFile),
     PROJECT_TSCONFIG,
     PROJECT_PROVIDERS_TS,
+    PROJECT_DOCKER_COMPOSE,
+    PROJECT_DEPLOYMENT_JSON,
   ];
 
   // Merge: base files first, then template files.
@@ -547,16 +549,18 @@ export const useIDEStore = create<IDEStore>()(
         if (!activeProjectId || !activeProject) return;
         const now = Date.now();
 
-        // Find or create the "generated" folder at root level
+        // Find or create the "contracts" folder at root level
+        // Compile output (contract-info.json, index.js, index.d.ts) lives here
+        // alongside the source .compact file.
         let folders = [...(activeProject.folders ?? [])];
-        let genFolder = folders.find((f) => f.name === "generated" && f.parentId === null);
+        let genFolder = folders.find((f) => f.name === "contracts" && f.parentId === null);
         if (!genFolder) {
-          genFolder = { id: generateId(), name: "generated", parentId: null, createdAt: now };
+          genFolder = { id: generateId(), name: "contracts", parentId: null, createdAt: now };
           folders = [...folders, genFolder];
         }
         const folderId = genFolder.id;
 
-        // Upsert each file by name within the generated folder
+        // Upsert each file by name within the contracts folder
         let updatedFiles = [...activeProject.files];
         for (const newFile of files) {
           const idx = updatedFiles.findIndex((f) => f.name === newFile.name && f.folderId === folderId);

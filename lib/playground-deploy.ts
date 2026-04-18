@@ -106,23 +106,51 @@ export async function deployPlaygroundContract(
   try {
     ({ contractAddress } = await api.deploy());
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    // ZKConfigurationReadError wraps the real cause — surface it
-    const cause = (err as { cause?: unknown })?.cause;
-    const causeMsg = cause instanceof Error ? `: ${cause.message}` : cause ? `: ${String(cause)}` : "";
-    log("error", `Deploy transaction failed: ${msg}${causeMsg}`);
-    if (msg.includes("proof server") || msg.includes("503") || msg.toLowerCase().includes("cannot reach")) {
+    // Serialize any unknown error — DApp connector throws plain objects like
+    // { code, message, data } so String() gives "[object Object]". Use JSON.
+    const serialize = (v: unknown, depth = 0): string => {
+      if (depth > 4) return "[…]";
+      if (v instanceof Error) {
+        const base = v.message || v.toString();
+        return (v as { cause?: unknown }).cause
+          ? `${base} → ${serialize((v as { cause?: unknown }).cause, depth + 1)}`
+          : base;
+      }
+      if (typeof v === "string") return v;
+      if (v === null || v === undefined) return String(v);
+      try { return JSON.stringify(v); } catch { return String(v); }
+    };
+
+    const msg = serialize(err);
+    log("error", `Deploy transaction failed: ${msg}`);
+
+    // Also log all enumerable own properties for debugging
+    if (err !== null && typeof err === "object" && !(err instanceof Error)) {
+      log("error", `Error detail: ${JSON.stringify(err, null, 2)}`);
+    } else if (err instanceof Error && (err as { cause?: unknown }).cause) {
+      const cause = (err as { cause?: unknown }).cause;
+      log("error", `Caused by: ${serialize(cause)}`);
+      if (cause !== null && typeof cause === "object" && !(cause instanceof Error)) {
+        log("error", `Cause detail: ${JSON.stringify(cause, null, 2)}`);
+      }
+    }
+
+    const lower = msg.toLowerCase();
+    if (lower.includes("proof server") || lower.includes("503") || lower.includes("cannot reach")) {
       log("warn", "Cannot reach the local Docker proof server. Start it with:");
       log("warn", "  docker run -p 6300:6300 midnightntwrk/proof-server");
     }
-    if (msg.includes("verifier key") || msg.includes("prover key") || msg.includes("zkir")) {
+    if (lower.includes("verifier key") || lower.includes("prover key") || lower.includes("zkir")) {
       log("warn", "ZK asset fetch failed. Expected files at /contracts/hello-world/keys/ and /contracts/hello-world/zkir/.");
       log("warn", "Make sure the Next.js dev server is running on localhost:3000 and the /public/contracts/ directory is present.");
     }
-    if (msg.includes("user") || msg.toLowerCase().includes("cancel") || msg.toLowerCase().includes("reject")) {
+    if (lower.includes("user") || lower.includes("cancel") || lower.includes("reject") || lower.includes("denied")) {
       log("warn", "It looks like the wallet request was rejected. Open Lace and approve the transaction.");
     }
-    return { success: false, duration: Date.now() - t0, error: `${msg}${causeMsg}` };
+    if (lower.includes("balance") || lower.includes("insufficient") || lower.includes("funds")) {
+      log("warn", "The wallet may have insufficient balance on Midnight Preprod. Check your tDUST balance in Lace.");
+    }
+    return { success: false, duration: Date.now() - t0, error: msg };
   }
 
   const duration = Date.now() - t0;

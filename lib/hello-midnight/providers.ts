@@ -76,7 +76,7 @@ export async function createHelloWorldProviders(
   const zkConfigBaseUrl = `${window.location.origin}/contracts/hello-world`;
   const zkConfigProvider = new FetchZkConfigProvider<HelloWorldCircuitId>(
     zkConfigBaseUrl,
-    (url: string, init?: RequestInit) => window.fetch(url, init),
+    (url: string | Request | URL, init?: RequestInit) => window.fetch(url, init),
   );
 
   // 4. Proof provider — delegates proving to the local Docker proof server.
@@ -91,11 +91,15 @@ export async function createHelloWorldProviders(
   );
 
   // 6. Private state provider — browser IndexedDB, scoped to this wallet
+  //    coinPublicKey is bech32/hex (only lowercase + digits = 2 character classes).
+  //    levelPrivateStateProvider requires ≥3 classes, so we derive a compliant
+  //    password by appending a fixed suffix: adds uppercase (M) + special char (!).
+  const storagePassword = `${coinPublicKey}!Mn`;
   const privateStateProvider = levelPrivateStateProvider<
     HelloWorldPrivateStateId,
     HelloWorldPrivateState
   >({
-    privateStoragePasswordProvider: () => coinPublicKey,
+    privateStoragePasswordProvider: () => storagePassword,
     accountId: coinPublicKey,
   });
 
