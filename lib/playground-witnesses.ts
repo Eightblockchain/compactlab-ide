@@ -1,9 +1,26 @@
 /**
  * Playground witness helpers — parse user-supplied private inputs and
  * build Compact witness functions from declared `witness` specs.
+ *
+ * Hex helpers are local so this module stays browser-safe (midnight-js-utils
+ * pulls Node APIs that break Client Component SSR).
  */
 
-import { fromHex, toHex } from "@midnight-ntwrk/midnight-js-utils";
+function toHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function fromHex(hex: string): Uint8Array {
+  const clean = hex.startsWith("0x") || hex.startsWith("0X") ? hex.slice(2) : hex;
+  if (clean.length % 2 !== 0) {
+    throw new Error("Hex string must have even length");
+  }
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    out[i] = Number.parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+  }
+  return out;
+}
 
 export type WitnessSpec = { name: string; type: string };
 
