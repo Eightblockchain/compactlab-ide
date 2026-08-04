@@ -13,6 +13,14 @@ const nextConfig: NextConfig = {
       // file loading. In browser context this fails; replace with empty shim.
       // NOTE: 'path' is NOT aliased here because server-side code needs the real path module.
       "fs": "./shims/empty.js",
+      // Force a single WASM-bearing Midnight package instance. Duplicate copies
+      // break instanceof checks (e.g. "expected instance of CostModel").
+      // IMPORTANT: alias to the real package path — do NOT alias through a
+      // re-export shim (that creates a circular resolve and zero exports).
+      "@midnight-ntwrk/compact-js": "./node_modules/@midnight-ntwrk/compact-js",
+      "@midnight-ntwrk/compact-runtime": "./node_modules/@midnight-ntwrk/compact-runtime",
+      "@midnight-ntwrk/ledger-v8": "./node_modules/@midnight-ntwrk/ledger-v8",
+      "@midnight-ntwrk/onchain-runtime-v3": "./node_modules/@midnight-ntwrk/onchain-runtime-v3",
     },
   },
 
@@ -61,9 +69,11 @@ const nextConfig: NextConfig = {
           { key: "X-Frame-Options", value: "DENY" },
           { key: "X-XSS-Protection", value: "1; mode=block" },
           { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-          // COOP+COEP required for SharedArrayBuffer / WASM threads
-          { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
-          { key: "Cross-Origin-Embedder-Policy", value: "require-corp" },
+          // Cross-origin isolation for WASM/SharedArrayBuffer.
+          // Use credentialless (not require-corp): Lace/Midnight extension injection
+          // commonly breaks under require-corp. Keep COOP allow-popups for wallet UI.
+          { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
+          { key: "Cross-Origin-Embedder-Policy", value: "credentialless" },
         ],
       },
       {
