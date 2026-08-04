@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Per-project full ZK compile output (written by /api/compile?zk=true)
+/public/contracts/managed/

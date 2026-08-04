@@ -18,16 +18,23 @@ export async function POST(req: NextRequest) {
 
   let upstream: Response;
   try {
+    // Proof generation can take several minutes for large circuits.
+    // Without a timeout the browser request hangs indefinitely if the
+    // proof server is slow or unresponsive.
     upstream = await fetch(`${PROOF_SERVER_URL}/prove`, {
       method: "POST",
       headers: { "Content-Type": "application/octet-stream" },
       body,
+      signal: AbortSignal.timeout(5 * 60_000), // 5 minutes
     });
   } catch (err) {
+    const isTimeout = err instanceof Error && err.name === "TimeoutError";
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { error: `Cannot reach proof server at ${PROOF_SERVER_URL}: ${msg}` },
-      { status: 503 }
+      { error: isTimeout
+          ? `Proof server at ${PROOF_SERVER_URL} did not respond within 5 minutes. Is it still running?`
+          : `Cannot reach proof server at ${PROOF_SERVER_URL}: ${msg}` },
+      { status: 503 },
     );
   }
 

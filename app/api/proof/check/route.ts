@@ -18,12 +18,16 @@ export async function POST(req: NextRequest) {
       method: "POST",
       headers: { "Content-Type": "application/octet-stream" },
       body,
+      signal: AbortSignal.timeout(30_000), // 30 seconds
     });
   } catch (err) {
+    const isTimeout = err instanceof Error && err.name === "TimeoutError";
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
-      { error: `Cannot reach proof server at ${PROOF_SERVER_URL}: ${msg}` },
-      { status: 503 }
+      { error: isTimeout
+          ? `Proof server at ${PROOF_SERVER_URL} did not respond to /check within 30s. Is Docker running?`
+          : `Cannot reach proof server at ${PROOF_SERVER_URL}: ${msg}` },
+      { status: 503 },
     );
   }
 
