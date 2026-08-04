@@ -14,7 +14,7 @@ export function bundledAssetBase(slug: string): string {
 
 export function managedAssetBase(projectId: string): string {
   const safeId = projectId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
-  return `/contracts/managed/${safeId}`;
+  return `/api/zk/${safeId}`;
 }
 
 export function isDeployableTemplate(template: string): template is DeployableTemplate {

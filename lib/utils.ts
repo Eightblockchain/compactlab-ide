@@ -24,7 +24,10 @@ export function sleep(ms: number): Promise<void> {
 }
 
 export function generateId(): string {
-  return Math.random().toString(36).slice(2, 11);
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID().replace(/-/g, "");
+  }
+  return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
 }
 
 export function slugify(name: string): string {

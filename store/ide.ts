@@ -1,10 +1,11 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { generateId, slugify } from "@/lib/utils";
-import { COMPACT_TEMPLATES, SAMPLE_PROJECTS, PROJECT_BASE_FOLDERS, PROJECT_TSCONFIG, PROJECT_PROVIDERS_TS, PROJECT_DOCKER_COMPOSE, PROJECT_DEPLOYMENT_JSON, buildPackageJson } from "@/lib/constants";
+import { COMPACT_TEMPLATES, SAMPLE_PROJECTS, PROJECT_BASE_FOLDERS, PROJECT_TSCONFIG, PROJECT_PROVIDERS_TS, PROJECT_DEPLOYMENT_JSON, buildPackageJson } from "@/lib/constants";
 import { COMPACT_STABLE_VERSION } from "@/lib/version";
 import type { CompactVersion } from "@/lib/version";
 import type { CompileResult, SimulateResult, DeployResult, LogEntry } from "@/lib/compact";
+import { fingerprintSource } from "@/lib/deploy-gate";
 
 export type IDEStatus = "idle" | "compiling" | "simulating" | "deploying" | "saving";
 export type PanelTab = "contract-ui" | "source-scan";
@@ -47,6 +48,8 @@ export interface Project {
   witnessValues?: Record<string, string>;
   /** Base URL for full-ZK compile artifacts (e.g. /contracts/managed/<id>) */
   artifactBaseUrl?: string | null;
+  /** Fingerprint of .compact source at last successful full ZK compile */
+  compiledSourceHash?: string | null;
 }
 
 export interface WalletState {
@@ -181,12 +184,11 @@ function buildProject(
   const contractFile =
     tpl.files.find((f) => f.language === "compact")?.name ?? "contract.compact";
 
-  // Shared base files injected into every project.
+  // Shared base files injected into every project (no Docker — 1AM proves in v1).
   const baseFiles = [
     buildPackageJson(slugify(name), contractFile),
     PROJECT_TSCONFIG,
     PROJECT_PROVIDERS_TS,
-    PROJECT_DOCKER_COMPOSE,
     PROJECT_DEPLOYMENT_JSON,
   ];
 
@@ -739,13 +741,37 @@ export const useIDEStore = create<IDEStore>()(
       // ── IDE actions ────────────────────────────────────────────────────────
       setStatus: (status) => set({ status }),
       setCompileResult: (compileResult) => {
-        const { activeProjectId, activeProject, projects } = get();
+        const { activeProjectId, activeProject, projects, code, activeFile, tabBuffers } = get();
         if (activeProjectId && activeProject) {
+          const compact = activeProject.files.find((f) => f.language === "compact");
+          let source = compact?.content ?? "";
+          if (activeFile?.language === "compact") source = code;
+          else if (compact && tabBuffers[compact.id] !== undefined) source = tabBuffers[compact.id];
+
+          const fullZk =
+            !!compileResult?.success &&
+            !compileResult.skipZk &&
+            !!compileResult.artifactBaseUrl;
+
+          // Keep .compact file content in sync with what was compiled / is open
+          let files = activeProject.files;
+          if (compact && source && compact.content !== source) {
+            files = files.map((f) =>
+              f.id === compact.id ? { ...f, content: source, updatedAt: Date.now() } : f,
+            );
+          }
+
           const updated = {
             ...activeProject,
+            files,
             compileResult,
-            artifactBaseUrl:
-              compileResult?.artifactBaseUrl ?? activeProject.artifactBaseUrl ?? null,
+            artifactBaseUrl: fullZk
+              ? compileResult.artifactBaseUrl
+              : (activeProject.artifactBaseUrl ?? null),
+            compiledSourceHash: fullZk
+              ? fingerprintSource(source)
+              : (activeProject.compiledSourceHash ?? null),
+            updatedAt: Date.now(),
           };
           set({
             compileResult,
@@ -760,7 +786,47 @@ export const useIDEStore = create<IDEStore>()(
       setDeployResult: (deployResult) => {
         const { activeProjectId, activeProject, projects } = get();
         if (activeProjectId && activeProject) {
-          const updated = { ...activeProject, deployResult };
+          let files = activeProject.files;
+          if (deployResult?.success) {
+            const payload = JSON.stringify(
+              {
+                network: "preprod",
+                contractAddress: deployResult.contractAddress ?? null,
+                txHash: deployResult.transactionHash ?? null,
+                blockHeight: deployResult.blockNumber ?? null,
+                deployedAt: new Date().toISOString(),
+                template: activeProject.template,
+                artifactBaseUrl: activeProject.artifactBaseUrl ?? null,
+              },
+              null,
+              2,
+            );
+            const idx = files.findIndex((f) => f.name === "deployment.json" && !f.folderId);
+            if (idx >= 0) {
+              files = files.map((f, i) =>
+                i === idx ? { ...f, content: payload, updatedAt: Date.now() } : f,
+              );
+            } else {
+              files = [
+                ...files,
+                {
+                  id: generateId(),
+                  name: "deployment.json",
+                  language: "json" as const,
+                  content: payload,
+                  folderId: null,
+                  createdAt: Date.now(),
+                  updatedAt: Date.now(),
+                },
+              ];
+            }
+          }
+          const updated = {
+            ...activeProject,
+            deployResult,
+            files,
+            updatedAt: Date.now(),
+          };
           set({
             deployResult,
             activeProject: updated,
@@ -860,6 +926,10 @@ export const useIDEStore = create<IDEStore>()(
           state.activeFileId = file?.id ?? null;
           state.activeFile = file ?? null;
           state.code = file?.content ?? "";
+          // Restore per-project results (same as loadProject)
+          state.compileResult = proj.compileResult ?? null;
+          state.deployResult = proj.deployResult ?? null;
+          state.witnessValues = proj.witnessValues ?? {};
           // Validate persisted tab IDs still exist in the project
           const validFileIds = new Set(proj.files?.map((f) => f.id) ?? []);
           const restoredTabs = (state.openTabIds ?? []).filter((id) => validFileIds.has(id));
