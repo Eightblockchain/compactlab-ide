@@ -1,4 +1,4 @@
-import { sleep, generateId } from "./utils";
+import { generateId } from "./utils";
 
 export type LogLevel = "info" | "success" | "error" | "warn" | "debug";
 
@@ -17,6 +17,29 @@ export interface CompileResult {
   circuitMetadata?: CircuitMeta[];
   errors?: CompileError[];
   warnings?: string[];
+  mock?: boolean;
+  compilerVersion?: string;
+  languageVersion?: string;
+  skipZk?: boolean;
+  stdoutHint?: string;
+  artifacts?: {
+    skipZk: boolean;
+    contract: string[];
+    keys: string[];
+    zkir: string[];
+    compiler: string[];
+  };
+  generatedFiles?: Array<{
+    path?: string;
+    name: string;
+    language: "json" | "javascript" | "typescript" | "text";
+    content: string;
+  }>;
+  /** Present when a full ZK compile wrote assets under /contracts/... */
+  artifactBaseUrl?: string;
+  projectId?: string;
+  error?: string;
+  installHint?: string;
 }
 
 export interface CircuitMeta {
@@ -53,17 +76,62 @@ export interface DeployResult {
   error?: string;
 }
 
-// Deterministic hash of a string → number (no Math.random, avoids SSR hydration mismatch)
-function deterministicHash(str: string): number {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = (hash << 5) - hash + str.charCodeAt(i);
-    hash |= 0; // convert to 32-bit int
+/** Client helper: POST /api/compile and return typed result. */
+export async function compileCompact(
+  code: string,
+  options?: { projectId?: string; zk?: boolean },
+): Promise<CompileResult & { pragmaNormalized?: boolean; normalizedCode?: string }> {
+  const { normalizeCompactPragma } = await import("@/lib/version");
+  const { code: normalizedCode, changed } = normalizeCompactPragma(code);
+
+  const res = await fetch("/api/compile", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      code: normalizedCode,
+      projectId: options?.projectId,
+      zk: options?.zk ?? false,
+    }),
+  });
+
+  const body = (await res.json()) as CompileResult & {
+    error?: string;
+    installHint?: string;
+    details?: unknown;
+  };
+
+  if (!res.ok) {
+    return {
+      success: false,
+      duration: body.duration ?? 0,
+      errors: body.errors ?? [
+        {
+          line: 1,
+          column: 1,
+          message:
+            body.error ??
+            body.installHint ??
+            `Compile service returned ${res.status}`,
+          severity: "error",
+        },
+      ],
+      warnings: body.warnings,
+      installHint: body.installHint,
+      error: body.error,
+      mock: false,
+      pragmaNormalized: changed,
+      normalizedCode: changed ? normalizedCode : undefined,
+    };
   }
-  return Math.abs(hash);
+
+  return {
+    ...body,
+    pragmaNormalized: changed,
+    normalizedCode: changed ? normalizedCode : undefined,
+  };
 }
 
-// Extract circuits from Compact code (mock parser)
+// Extract circuits from Compact code (source scan — not a real compiler)
 export function extractCircuits(code: string): CircuitMeta[] {
   const circuits: CircuitMeta[] = [];
   const circuitRegex = /export\s+circuit\s+(\w+)\s*\(([^)]*)\)\s*:\s*([^\{]+)/g;
@@ -88,7 +156,7 @@ export function extractCircuits(code: string): CircuitMeta[] {
       name,
       inputs,
       output: outputStr,
-      constraints: (deterministicHash(name) % 150) + 50,
+      constraints: 0,
       isExported: true,
     });
   }
@@ -96,10 +164,10 @@ export function extractCircuits(code: string): CircuitMeta[] {
   return circuits;
 }
 
-// Extract ledger variables from code (mock parser)
+// Extract ledger variables from code (source scan)
 export function extractLedgerVars(code: string): { name: string; type: string; isPublic: boolean }[] {
   const vars: { name: string; type: string; isPublic: boolean }[] = [];
-  const ledgerRegex = /ledger\s+(\w+)\s*:\s*([^;]+);/g;
+  const ledgerRegex = /(?:export\s+)?(?:sealed\s+)?ledger\s+(\w+)\s*:\s*([^;]+);/g;
   let match;
 
   while ((match = ledgerRegex.exec(code)) !== null) {
@@ -113,10 +181,10 @@ export function extractLedgerVars(code: string): { name: string; type: string; i
   return vars;
 }
 
-// Extract witness variables from code (mock parser)
+// Extract witness declarations: `witness foo(): Type;`
 export function extractWitnesses(code: string): { name: string; type: string }[] {
   const witnesses: { name: string; type: string }[] = [];
-  const witnessRegex = /witness\s+(\w+)\s*:\s*([^;]+);/g;
+  const witnessRegex = /witness\s+(\w+)\s*\([^)]*\)\s*:\s*([^;]+);/g;
   let match;
 
   while ((match = witnessRegex.exec(code)) !== null) {
@@ -129,120 +197,11 @@ export function extractWitnesses(code: string): { name: string; type: string }[]
   return witnesses;
 }
 
-// Mock compile function
-export async function mockCompile(
-  code: string,
-  onLog: (log: LogEntry) => void
-): Promise<CompileResult> {
-  const start = Date.now();
-
-  onLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Starting compilation...", source: "compiler" });
-  await sleep(300);
-
-  const hasPragma = /pragma language_version/.test(code);
-  const hasExportedCircuit = /export\s+circuit\s+\w+/.test(code);
-  const hasLedger = /export\s+ledger\s+\w+/.test(code);
-
-  if (!hasPragma) {
-    onLog({ id: generateId(), timestamp: Date.now(), level: "warn", message: "Missing pragma language_version declaration", source: "compiler" });
-  }
-
-  if (!hasExportedCircuit && !hasLedger) {
-    onLog({ id: generateId(), timestamp: Date.now(), level: "error", message: "No exported circuits or ledger declarations found", source: "compiler" });
-    return {
-      success: false,
-      duration: Date.now() - start,
-      errors: [{ line: 1, column: 1, message: "Add at least one `export circuit` or `export ledger` declaration", severity: "error" }],
-    };
-  }
-
-  onLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Parsing AST...", source: "compiler" });
-  await sleep(200);
-  onLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Type checking...", source: "compiler" });
-  await sleep(250);
-
-  const circuits = extractCircuits(code);
-  onLog({ id: generateId(), timestamp: Date.now(), level: "info", message: `Found ${circuits.length} circuit(s)`, source: "compiler" });
-  await sleep(200);
-
-  onLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Generating constraint system...", source: "compiler" });
-  await sleep(400);
-  onLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Optimizing constraints...", source: "compiler" });
-  await sleep(200);
-
-  const totalConstraints = circuits.reduce((sum, c) => sum + c.constraints, 0);
-  
-  onLog({ id: generateId(), timestamp: Date.now(), level: "success", message: `Compilation successful — ${totalConstraints} constraints generated`, source: "compiler" });
-  
-  return {
-    success: true,
-    duration: Date.now() - start,
-    constraintCount: totalConstraints,
-    circuitMetadata: circuits,
-    warnings: code.length > 2000 ? ["Contract size is large, consider splitting into modules"] : [],
-  };
-}
-
-// Mock simulate function
-export async function mockSimulate(
-  circuitName: string,
-  inputs: Record<string, string>,
-  onLog: (log: LogEntry) => void
-): Promise<SimulateResult> {
-  const start = Date.now();
-
-  onLog({ id: generateId(), timestamp: Date.now(), level: "info", message: `Simulating circuit: ${circuitName}`, source: "simulator" });
-  await sleep(200);
-  onLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Building witness...", source: "simulator" });
-  await sleep(300);
-  onLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Generating ZK proof...", source: "simulator" });
-  await sleep(500);
-  onLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Verifying proof...", source: "simulator" });
-  await sleep(200);
-
-  const outputVal = Object.values(inputs)[0] ? parseInt(Object.values(inputs)[0] as string, 10) + 1 : 1;
-
-  onLog({ id: generateId(), timestamp: Date.now(), level: "success", message: `Circuit executed successfully. Output: ${outputVal}`, source: "simulator" });
-
-  return {
-    success: true,
-    output: outputVal,
-    logs: [],
-    gasUsed: Math.floor(Math.random() * 5000) + 1000,
-    duration: Date.now() - start,
-    stateChanges: [
-      { key: "counter", before: "0", after: String(outputVal) },
-    ],
-  };
-}
-
-// Mock deploy function
-export async function mockDeploy(
-  onLog: (log: LogEntry) => void
-): Promise<DeployResult> {
-  const start = Date.now();
-
-  onLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Connecting to Midnight Devnet...", source: "network" });
-  await sleep(400);
-  onLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Wallet signing transaction...", source: "network" });
-  await sleep(600);
-  onLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Submitting contract bytecode...", source: "network" });
-  await sleep(800);
-  onLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Waiting for block confirmation...", source: "network" });
-  await sleep(1200);
-
-  const contractAddress = `0x${Math.random().toString(16).slice(2, 42).padEnd(40, "0")}`;
-  const txHash = `0x${Math.random().toString(16).slice(2, 66).padEnd(64, "0")}`;
-
-  onLog({ id: generateId(), timestamp: Date.now(), level: "success", message: `Contract deployed at ${contractAddress}`, source: "network" });
-  onLog({ id: generateId(), timestamp: Date.now(), level: "info", message: `Transaction: ${txHash}`, source: "network" });
-
-  return {
-    success: true,
-    contractAddress,
-    transactionHash: txHash,
-    blockNumber: Math.floor(Math.random() * 10000) + 50000,
-    gasUsed: Math.floor(Math.random() * 50000) + 10000,
-    duration: Date.now() - start,
-  };
+/** Build a standard log entry. */
+export function makeLog(
+  level: LogLevel,
+  message: string,
+  source?: string,
+): LogEntry {
+  return { id: generateId(), timestamp: Date.now(), level, message, source };
 }
