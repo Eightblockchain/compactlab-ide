@@ -32,6 +32,10 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# local pnpm content-addressable store (should not be in repo)
+.pnpm-store/
 
 # vercel
 .vercel
@@ -40,5 +44,9 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Per-project full ZK compile output (written by /api/compile?zk=true)
+# Per-project full ZK compile output (legacy path; prefer .data/)
 /public/contracts/managed/
+
+# Private managed ZK artifacts (public product)
+/.data/
+
