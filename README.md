@@ -1,126 +1,71 @@
 # CompactLab IDE
 
-> A browser-based IDE for writing, simulating, and deploying smart contracts on the [Midnight](https://midnight.network) blockchain using the **Compact** language.
+Browser-based IDE for writing, compiling, and deploying **Compact** smart contracts on [Midnight](https://midnight.network) Preprod.
 
-This project extends the Midnight Network with additional developer tooling.
+## What works in v1
 
----
+End-to-end on Midnight Preprod for **hello-world** and **counter** (bundled ZK assets):
 
-## What is this?
+1. Open `/playground`
+2. Compile with the local Compact CLI (`--skip-zk` typecheck, or **Compile (ZK)** for deployable keys from your edits)
+3. Connect **Lace** (Preprod) and fund tDUST from the [faucet](https://faucet.preprod.midnight.network/)
+4. Ensure Docker proof server is running (auto-started from Deploy, or see below)
+5. **Deploy** → real contract address
+6. **Contract UI** → call circuits (`storeMessage`, `increment`, …) and read state via indexer
 
-[Midnight](https://midnight.network) is a privacy-focused blockchain built on Cardano. Smart contracts on Midnight are written in **Compact** — a domain-specific language designed for zero-knowledge proof generation.
+Other templates are **compile-only** educational samples until you run **Compile (ZK)** for that project.
 
-**CompactLab** is the development environment for Compact. Think of it as an in-browser IDE — like Remix for Ethereum, but purpose-built for Midnight. You write Compact code, inspect circuits, simulate execution, and deploy contracts, all without leaving your browser.
+### Limitation
 
----
+- Default **Compile** uses `--skip-zk` (syntax/typecheck). Bundled deploy still uses precompiled assets under `public/contracts/<template>/` unless you run **Compile (ZK)**, which writes artifacts to `public/contracts/managed/<projectId>/` and wires Deploy/Call to those assets.
 
-## Features
+## Prerequisites
 
-- **Monaco Editor** — full-featured code editor with Compact syntax highlighting, keyword/type completion, and bracket matching
-- **Compact Language Support** — custom tokenizer and theme covering keywords (`circuit`, `contract`, `ledger`, `pragma`), types (`Uint`, `Boolean`, `Bytes`), operators, strings, and comments
-- **Resizable Panel Layout** — sidebar for project navigation, central editor, bottom output panel, and right-side circuit inspector — all resizable
-- **Circuit Inspector** — visualize the zero-knowledge circuits extracted from your contract, including public/private inputs and witness parameters
-- **Simulate & Deploy** — run mock simulations and trigger deployment flows directly from the IDE toolbar
-- **Project Management** — create, switch between, and persist multiple Compact projects in the browser
-- **Deep Dark Theme** — purpose-designed dark UI with `#F06358` coral brand accent, high-contrast syntax colors, and zero visual noise
-
----
-
-## Tech Stack
-
-| Layer | Technology |
+| Dependency | Why |
 |---|---|
-| Framework | Next.js 16 (App Router, Turbopack) |
-| Language | TypeScript |
-| Styling | Tailwind CSS v4 (CSS-first config) |
-| Editor | Monaco Editor (`@monaco-editor/react`) |
-| State | Zustand with persist middleware |
-| Panels | react-resizable-panels v4 |
-| Animations | Framer Motion |
-| Database | Prisma (schema ready, SQLite by default) |
-| Validation | Zod |
+| [Node.js 18+](https://nodejs.org/) | App runtime |
+| [Compact CLI](https://docs.midnight.network/) (`compact` on PATH) | Real compile |
+| [Docker](https://docker.com) + `midnightntwrk/proof-server` | ZK prove/check |
+| [Lace](https://lace.io) with Midnight | Sign + submit txs |
+| Preprod tDUST | [Faucet](https://faucet.preprod.midnight.network/) |
 
----
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js 18+
-- npm
-
-### Install & Run
+### Proof server
 
 ```bash
-git clone https://github.com/Eightblockchain/compactlab-ide.git
-cd compactlab-ide
-npm install
-npm run dev
+docker run -d --rm -p 6300:6300 --name compactlab-proof-server midnightntwrk/proof-server
 ```
 
-Open [http://localhost:3000/playground](http://localhost:3000/playground) to launch the IDE.
+The IDE can also start it via `POST /api/proof/start` when you Deploy.
 
-### Build for Production
+## Install & run
 
 ```bash
-npm run build
-npm start
+pnpm install   # or npm install
+pnpm dev
 ```
 
----
+Open [http://localhost:3000/playground](http://localhost:3000/playground).
 
-## Project Structure
+## API routes
 
-```
-compactlab/
-├── app/
-│   ├── playground/        # Main IDE page
-│   ├── api/
-│   │   ├── compile/       # Compile endpoint
-│   │   ├── deploy/        # Deploy endpoint
-│   │   └── projects/      # Project CRUD
-│   ├── globals.css        # Design tokens + global styles
-│   └── layout.tsx
-├── components/
-│   ├── editor/
-│   │   ├── CompactEditor.tsx      # Monaco editor wrapper
-│   │   └── compact-language.ts   # Tokenizer, theme, completions
-│   ├── layout/
-│   │   ├── Topbar.tsx
-│   │   └── Sidebar.tsx
-│   └── panels/
-│       ├── InspectorPanel.tsx
-│       └── BottomPanel.tsx
-├── store/
-│   └── ide.ts             # Zustand global state
-├── lib/
-│   ├── compact.ts         # Compact language utilities
-│   ├── constants.ts
-│   └── utils.ts
-└── prisma/
-    └── schema.prisma
-```
+| Route | Purpose |
+|---|---|
+| `GET/POST /api/compile` | Compact CLI compile (`zk: true` for full keys). Returns **503** if CLI missing. |
+| `GET /api/proof/health` | Proof server reachability |
+| `POST /api/proof/start` | Start Docker proof-server |
+| `POST /api/proof/prove` | Proxy prove → `:6300` |
+| `POST /api/proof/check` | Proxy check → `:6300` |
+| `POST /api/indexer` | Preprod GraphQL indexer proxy (CORS) |
 
----
+Projects persist in browser localStorage (Zustand). There is no Prisma/cloud backend in v1.
 
-## Roadmap
+## Manual test script (v1 gate)
 
-- [ ] Real Compact compiler integration via WASM
-- [ ] Live ZK proof simulation output
-- [ ] Midnight testnet deployment
-- [ ] Project export / import
-- [ ] Collaborative editing
-- [ ] Dark/light theme toggle
+See [docs/V1_TEST_SCRIPT.md](docs/V1_TEST_SCRIPT.md).
 
----
+## Tech stack
 
-## About Midnight & Compact
-
-Midnight is a data-protection blockchain that lets developers build applications where sensitive data is shielded using zero-knowledge proofs. Compact is its native smart contract language — it compiles down to ZK circuits that Midnight executes privately on-chain.
-
-Learn more: [midnight.network](https://midnight.network)
-
----
+Next.js 16 · React 19 · Tailwind v4 · Monaco · Zustand · Midnight JS SDK
 
 ## License
 
