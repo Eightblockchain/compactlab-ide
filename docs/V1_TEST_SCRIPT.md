@@ -1,63 +1,90 @@
 # CompactLab v1 manual test script
 
-Run on a machine with Compact CLI, Docker, and Lace. Goal: complete the happy path in under 15 minutes.
+Run on a machine with Compact CLI and **1AM**. Goal: complete the happy path in under 15 minutes.
+
+No Docker proof server is required — ZK proving runs in 1AM.
 
 ## Prep
 
 1. `pnpm install && pnpm dev`
-2. Install Lace; enable Midnight Preprod
-3. Fund wallet: https://faucet.preprod.midnight.network/
-4. Optional: `docker run -d --rm -p 6300:6300 midnightntwrk/proof-server`
+2. Install [1AM](https://1am.xyz/); unlock; select Midnight **Preprod**
+3. Fund tDUST: https://faucet.preprod.midnight.network/
+4. Compact CLI on PATH (`compact --version`) for Compile cases
 
 ## Cases
 
-### 1. Compact CLI missing → hard fail
+### 1. Connect 1AM
 
-- Temporarily rename `compact` off PATH
-- Click **Compile**
-- Expect: error in Compile tab / logs with install hint — **no** green mock success
+- Click **Connect 1AM**
+- Approve in the extension
+- Expect: address chip in the topbar; status shows Prove 1AM
 
-### 2. Compact CLI present → real compile
+### 2. Reject non-1AM
 
-- Restore `compact`
-- Open Hello, Midnight!
-- Click **Compile**
-- Expect: success with `mock: false`, circuit list, optional generated files under `contracts/managed/`
+- If only Lace is installed (no 1AM): expect install/connect error pointing to https://1am.xyz/
+- Lace must not appear as a supported wallet in v1
 
-### 3. Proof server down → clear Deploy error
+### 3. Hello World Deploy + Call (instant path)
 
-- Stop Docker proof container if running
-- With Lace connected, click **Deploy** on hello-world
-- Expect: logs explain Docker requirement / start failure (not a fake deploy address)
+1. Open **Hello, Midnight!** (do not edit source)
+2. Connect 1AM + tDUST
+3. **Deploy** — must work **without** Compact CLI on public hosts
+4. Contract UI → Call `storeMessage` with `"hi"`
+5. Click **View contract** → 1AM explorer opens
 
-### 4. Full deploy + call + read (hello-world)
+### 3b. Public host Compile gate
 
-1. Proof server healthy (or let Deploy auto-start)
-2. Lace connected + tDUST
-3. **Deploy** → real Preprod address in Network tab + Contract UI
-4. Call `storeMessage` with `"hi"` → real `txId`
-5. Refresh on-chain state → message shows `hi`
+- With default public config, **Compile** returns disabled / 403
+- Hello Instant Deploy still works
+- With `COMPACTLAB_ENABLE_COMPILE=true` + CLI, Compile is rate-limited
 
-### 5. Counter deployable
+### 4. Counter Deploy + Call
 
-1. Open or create **Counter** template
-2. Deploy → address
-3. Call `increment()` → tx succeeds
-4. State / decoded `round` increases
+Same as (3) with Counter → `increment` / `incrementBy`
 
-### 6. Non-deployable template
+### 5. Edit requires Compile
 
-1. Create project from **Voting** (or similar)
-2. Expect: **Deploy** disabled (tooltip explains)
-3. Compile still works with CLI
+1. Open Hello World, change the message circuit body or a comment meaningfully… better: change ledger/circuit source so fingerprint differs
+2. Expect **Deploy** disabled / error: run Compile first
+3. **Compile** (full ZK) → Deploy enabled again → Deploy succeeds against managed artifacts
 
-### 7. Compile (ZK) edit→chain (v1.1 path)
+### 6. New project from scratch
 
-1. Edit hello-world Compact source (e.g. comment change is not enough — prefer a visible ledger behavior change if testing semantics)
-2. Click **Compile (ZK)** — wait for artifacts at `/contracts/managed/<projectId>/`
-3. **Deploy** — logs should say “Using project ZK artifacts…”
-4. Call circuit and confirm on-chain behavior
+1. **New project** → Blank (or Voting)
+2. Edit / keep template source
+3. **Compile** → **Deploy** → **Call**
+
+### 7. Export
+
+1. After deploy, click **Export**
+2. Expect a `.zip` with source, `deployment.json` (address filled), and `COMPACTLAB_EXPORT.md`
+3. If Compile ran on this machine, zip includes `contracts/managed/` binaries
+
+### 8. Refresh keeps deploy state
+
+1. Deploy Hello, note address in Contract UI
+2. Hard refresh the browser
+3. Expect address / deploy result still visible without switching projects
+
+### 9. No Docker dependency
+
+- Ensure nothing listens on `:6300`
+- Deploy hello-world still succeeds with 1AM connected
+
+### 10. Witness template (optional)
+
+- Bulletin Board: Compile (ZK), Deploy, set `localSecretKey`, `post`, then `takeDown` with the **same** key
 
 ## Pass criteria
 
-All cases 1–6 pass. Case 7 is the edit→chain gate for v1.1.
+- [ ] 1AM connect works
+- [ ] Hello + Counter Deploy + Call without Docker
+- [ ] Hello Instant Deploy works without Compact CLI (public host)
+- [ ] Edited source blocks Deploy until Compile
+- [ ] Blank/template → Compile → Deploy works (local or ENABLE_COMPILE)
+- [ ] Export zip downloads
+- [ ] Refresh restores deploy/compile state
+- [ ] Clear error if 1AM missing
+- [ ] Public host: `/api/health` shows mode=public; Compile disabled by default
+- [ ] Public host: indexer rejects non-allowlisted GraphQL
+- [ ] `COMPACTLAB_SESSION_SECRET` required when public (API 503 if missing)

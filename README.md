@@ -1,71 +1,84 @@
 # CompactLab IDE
 
-Browser-based IDE for writing, compiling, and deploying **Compact** smart contracts on [Midnight](https://midnight.network) Preprod.
+Browser IDE for writing, compiling, and deploying **Compact** contracts on [Midnight](https://midnight.network) Preprod.
+
+## Product modes
+
+| Mode | When | Compile on server | Best for |
+|------|------|-------------------|----------|
+| **Local lab** | `pnpm dev` | On (if Compact CLI installed) | Full create → Compile → Deploy |
+| **Public product** | `NODE_ENV=production` or `COMPACTLAB_PUBLIC=true` | Off unless `COMPACTLAB_ENABLE_COMPILE=true` | Shared Instant Deploy (Hello / Counter) |
+
+See [docs/HOSTING.md](docs/HOSTING.md) for production hosting.
 
 ## What works in v1
 
-End-to-end on Midnight Preprod for **hello-world** and **counter** (bundled ZK assets):
+### A. Instant deploy (no server Compile)
+1. Open `/playground` → **Hello, Midnight!** or **Counter** (unedited)
+2. Connect **1AM** (Preprod) + [tDUST faucet](https://faucet.preprod.midnight.network/)
+3. **Deploy** → **Call** (proofs inside 1AM)
+4. **View contract** opens 1AM Preprod explorer
 
-1. Open `/playground`
-2. Compile with the local Compact CLI (`--skip-zk` typecheck, or **Compile (ZK)** for deployable keys from your edits)
-3. Connect **Lace** (Preprod) and fund tDUST from the [faucet](https://faucet.preprod.midnight.network/)
-4. Ensure Docker proof server is running (auto-started from Deploy, or see below)
-5. **Deploy** → real contract address
-6. **Contract UI** → call circuits (`storeMessage`, `increment`, …) and read state via indexer
+### B. Your own contract
+1. **New project** (blank or template) and edit `.compact`
+2. **Compile** (needs Compact CLI on the machine / enabled host)
+3. Connect 1AM → **Deploy** → **Call**
+4. **Export** zip (source + `deployment.json` + managed keys when present)
 
-Other templates are **compile-only** educational samples until you run **Compile (ZK)** for that project.
+Edited bundled templates require Compile before Deploy (source fingerprint gate).
 
-### Limitation
+## Public product security (v1)
 
-- Default **Compile** uses `--skip-zk` (syntax/typecheck). Bundled deploy still uses precompiled assets under `public/contracts/<template>/` unless you run **Compile (ZK)**, which writes artifacts to `public/contracts/managed/<projectId>/` and wires Deploy/Call to those assets.
+- Signed session cookie (`COMPACTLAB_SESSION_SECRET` required in public mode)
+- Rate limits on compile / indexer / artifacts / ZK asset fetches
+- Indexer proxy allowlists `contractAction` reads only
+- Managed ZK artifacts stored under `.data/` and served at `/api/zk/<id>/…` (not world-static `public/`)
+- Server Compile disabled by default in public mode
 
 ## Prerequisites
 
 | Dependency | Why |
 |---|---|
-| [Node.js 18+](https://nodejs.org/) | App runtime |
-| [Compact CLI](https://docs.midnight.network/) (`compact` on PATH) | Real compile |
-| [Docker](https://docker.com) + `midnightntwrk/proof-server` | ZK prove/check |
-| [Lace](https://lace.io) with Midnight | Sign + submit txs |
+| Node.js 18+ | App runtime |
+| [1AM](https://1am.xyz/) | Sign, submit, ZK prove |
 | Preprod tDUST | [Faucet](https://faucet.preprod.midnight.network/) |
+| [Compact CLI](https://docs.midnight.network/) | Local / enabled-host Compile only |
 
-### Proof server
-
-```bash
-docker run -d --rm -p 6300:6300 --name compactlab-proof-server midnightntwrk/proof-server
-```
-
-The IDE can also start it via `POST /api/proof/start` when you Deploy.
-
-## Install & run
+## Install & run (local)
 
 ```bash
-pnpm install   # or npm install
+pnpm install
+cp .env.example .env.local   # optional
 pnpm dev
 ```
 
 Open [http://localhost:3000/playground](http://localhost:3000/playground).
 
+## Production start
+
+```bash
+export COMPACTLAB_SESSION_SECRET="$(openssl rand -hex 32)"
+export COMPACTLAB_PUBLIC=true
+pnpm build && pnpm start
+```
+
 ## API routes
 
 | Route | Purpose |
 |---|---|
-| `GET/POST /api/compile` | Compact CLI compile (`zk: true` for full keys). Returns **503** if CLI missing. |
-| `GET /api/proof/health` | Proof server reachability |
-| `POST /api/proof/start` | Start Docker proof-server |
-| `POST /api/proof/prove` | Proxy prove → `:6300` |
-| `POST /api/proof/check` | Proxy check → `:6300` |
-| `POST /api/indexer` | Preprod GraphQL indexer proxy (CORS) |
+| `GET /api/health` | Mode + compile flag + limits |
+| `GET/POST /api/compile` | Compact CLI (gated / rate-limited) |
+| `GET /api/zk/[id]/…` | Private managed ZK assets |
+| `GET /api/artifacts` | Export helper (rate-limited) |
+| `POST /api/indexer` | Allowlisted Preprod GraphQL proxy |
 
-Projects persist in browser localStorage (Zustand). There is no Prisma/cloud backend in v1.
-
-## Manual test script (v1 gate)
+## Manual test script
 
 See [docs/V1_TEST_SCRIPT.md](docs/V1_TEST_SCRIPT.md).
 
 ## Tech stack
 
-Next.js 16 · React 19 · Tailwind v4 · Monaco · Zustand · Midnight JS SDK
+Next.js 16 · React 19 · Tailwind v4 · Monaco · Zustand · Midnight JS SDK · 1AM proving
 
 ## License
 
