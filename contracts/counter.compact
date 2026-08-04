@@ -1,0 +1,17 @@
+pragma language_version >= 0.22;
+
+import CompactStandardLibrary;
+
+// On-chain counter using Midnight's built-in Counter type.
+export ledger round: Counter;
+
+constructor() {
+}
+
+export circuit increment(): [] {
+  round.increment(1);
+}
+
+export circuit incrementBy(amount: Uint<16>): [] {
+  round.increment(disclose(amount));
+}
