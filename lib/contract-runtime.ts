@@ -11,11 +11,12 @@ import {
   SignatureEnabled,
   Proof,
   Binding,
+  CostModel,
 } from "@midnight-ntwrk/ledger-v8";
 import { FetchZkConfigProvider } from "@midnight-ntwrk/midnight-js-fetch-zk-config-provider";
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
-import { makeHttpProofProvider } from "@/lib/hello-midnight/http-proof-provider";
+import { dappConnectorProofProvider } from "@midnight-ntwrk/midnight-js-dapp-connector-proof-provider";
 import { setNetworkId } from "@midnight-ntwrk/midnight-js-network-id";
 import { toHex, fromHex } from "@midnight-ntwrk/midnight-js-utils";
 import type {
@@ -63,6 +64,9 @@ export type AnyProviders = MidnightProviders<any, any, any>;
 /**
  * Build Midnight providers pointed at a ZK asset base URL
  * (e.g. /contracts/hello-world or /contracts/managed/<id>).
+ *
+ * v1 proving is delegated to the wallet (1AM getProvingProvider) — no Docker
+ * proof server on the CompactLab host.
  */
 export async function createContractProviders(
   wallet: WalletConnectedAPI,
@@ -71,6 +75,12 @@ export async function createContractProviders(
   storeName = "compactlabPrivateState",
 ): Promise<AnyProviders> {
   setNetworkId(config.networkId);
+
+  if (typeof wallet.getProvingProvider !== "function") {
+    throw new Error(
+      'CompactLab v1 requires the 1AM wallet for ZK proving (wallet.getProvingProvider). Install 1AM from https://1am.xyz/ and connect it on Preprod.',
+    );
+  }
 
   const addresses = await wallet.getShieldedAddresses();
   const coinPublicKey = addresses.shieldedCoinPublicKey;
@@ -81,7 +91,11 @@ export async function createContractProviders(
     (url: string | Request | URL, init?: RequestInit) => window.fetch(url, init),
   );
 
-  const proofProvider = makeHttpProofProvider(zkConfigProvider);
+  const proofProvider = await dappConnectorProofProvider(
+    wallet,
+    zkConfigProvider,
+    CostModel.initialCostModel(),
+  );
 
   const publicDataProvider = indexerPublicDataProvider(
     config.indexerUri,
@@ -246,7 +260,11 @@ export class PlaygroundContractAPI {
     this.witnessOpts = witnessOpts;
   }
 
-  async deploy(): Promise<{ contractAddress: ContractAddress }> {
+  async deploy(): Promise<{
+    contractAddress: ContractAddress;
+    transactionHash?: string;
+    blockNumber?: number;
+  }> {
     const { compiledContract, privateStateId, witnessSpecs } = await getCompiledContract(
       this.slug,
       this.assetBase,
@@ -283,7 +301,23 @@ export class PlaygroundContractAPI {
           .join(", ")}`,
       );
     }
-    return { contractAddress: this.contractAddress! };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const pub = deployed.deployTxData?.public as any;
+    const transactionHash: string | undefined =
+      pub?.txId ?? pub?.transactionHash ?? pub?.txHash ?? undefined;
+    const blockNumber: number | undefined =
+      typeof pub?.blockHeight === "number"
+        ? pub.blockHeight
+        : typeof pub?.blockNumber === "number"
+          ? pub.blockNumber
+          : undefined;
+
+    return {
+      contractAddress: this.contractAddress!,
+      transactionHash,
+      blockNumber,
+    };
   }
 
   async join(contractAddress: ContractAddress): Promise<void> {

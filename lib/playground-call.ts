@@ -10,7 +10,6 @@
 import type { ConnectedAPI } from "@midnight-ntwrk/dapp-connector-api";
 import type { ContractAddress } from "@midnight-ntwrk/compact-runtime";
 import { generateId } from "@/lib/utils";
-import { ensureProofServer } from "@/lib/playground-deploy";
 import type { LogEntry } from "@/lib/compact";
 import { resolveAssetBase, bundledAssetBase } from "@/lib/playground-assets";
 import { PREPROD_CONFIG } from "@/lib/hello-midnight/types";
@@ -35,6 +34,12 @@ export async function callPlaygroundCircuit(
 ): Promise<{ txId: string }> {
   const t0 = Date.now();
 
+  if (typeof connectedAPI.getProvingProvider !== "function") {
+    throw new Error(
+      "Connected wallet cannot prove ZK transactions. CompactLab v1 requires 1AM (https://1am.xyz/).",
+    );
+  }
+
   const witnessSpecs = options?.witnessSpecs ?? [];
   const witnessValues = options?.witnessValues ?? {};
   if (witnessSpecs.length > 0) {
@@ -53,11 +58,7 @@ export async function callPlaygroundCircuit(
   });
 
   log(addLog, "info", `Joining contract ${contractAddress.slice(0, 16)}… (${slug} @ ${assetBase})`);
-
-  const proofReady = await ensureProofServer((level, message) => log(addLog, level, message));
-  if (!proofReady) {
-    throw new Error("Proof server could not be started. See network log for details.");
-  }
+  log(addLog, "info", "ZK proving via 1AM wallet (no Docker proof server).");
 
   const { createContractProviders, PlaygroundContractAPI } = await import(
     "@/lib/contract-runtime"
@@ -77,8 +78,8 @@ export async function callPlaygroundCircuit(
   await api.join(contractAddress as ContractAddress);
 
   log(addLog, "info", `Calling ${circuitName}(…)…`);
-  log(addLog, "info", "⏳ ZK proof generation may take 1–2 minutes.");
-  log(addLog, "warn", "Approve the transaction fee in your wallet when prompted.");
+  log(addLog, "info", "ZK proof generation may take 1–2 minutes inside 1AM.");
+  log(addLog, "warn", "Approve the transaction fee in 1AM when prompted.");
 
   try {
     const txResult = await api.callCircuit(circuitName, args);
@@ -89,9 +90,6 @@ export async function callPlaygroundCircuit(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const lower = msg.toLowerCase();
-    if (lower.includes("proof server") || lower.includes("503")) {
-      log(addLog, "warn", "Cannot reach proof server. Run: docker run -p 6300:6300 midnightntwrk/proof-server");
-    }
     if (lower.includes("not the current owner")) {
       log(
         addLog,

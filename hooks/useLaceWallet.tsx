@@ -1,9 +1,9 @@
 "use client";
 
 /**
- * Shared Midnight DApp Connector state (any wallet on window.midnight).
+ * CompactLab v1 wallet: 1AM only (delegated ZK proving via getProvingProvider).
  *
- * Spec: wallets inject under UUID keys — never hardcode Lace / mnLace.
+ * Spec still uses window.midnight UUID keys — we filter to 1AM by name/rdns.
  * https://docs.midnight.network/guides/react-wallet-connect
  */
 
@@ -39,7 +39,7 @@ export interface UseMidnightWalletReturn {
   connectTo: (wallet: DetectedWallet) => Promise<ConnectedAPI | null>;
   connect: () => Promise<ConnectedAPI | null>;
   disconnect: () => void;
-  /** Re-scan window.midnight after installing/enabling an extension. */
+  /** Re-scan window.midnight after installing/enabling 1AM. */
   refreshWallets: () => void;
 }
 
@@ -50,12 +50,21 @@ const MidnightWalletContext = createContext<UseMidnightWalletReturn | null>(null
 
 const TARGET_NETWORK = "preprod";
 
-/** Known install / docs links when no extension is detected. */
-export const MIDNIGHT_WALLET_LINKS = [
-  { name: "1AM", href: "https://1am.xyz/" },
-  { name: "Lace (Midnight)", href: "https://www.lace.io/midnight" },
-] as const;
+/** v1 install link — CompactLab requires 1AM for wallet-side proving. */
+export const MIDNIGHT_WALLET_LINKS = [{ name: "1AM", href: "https://1am.xyz/" }] as const;
 
+export function isOneAmWallet(api: InitialAPI): boolean {
+  const name = (api.name ?? "").toLowerCase();
+  const rdns = String((api as { rdns?: string }).rdns ?? "").toLowerCase();
+  return (
+    name.includes("1am") ||
+    name.includes("1 am") ||
+    rdns.includes("1am") ||
+    rdns.includes("oneam")
+  );
+}
+
+/** All Midnight wallets that look like 1AM (v1 supported set). */
 export function listMidnightWallets(): DetectedWallet[] {
   if (typeof window === "undefined") return [];
   const midnight = window.midnight;
@@ -65,7 +74,8 @@ export function listMidnightWallets(): DetectedWallet[] {
       (entry): entry is [string, InitialAPI] =>
         !!entry[1] &&
         typeof entry[1] === "object" &&
-        typeof (entry[1] as InitialAPI).connect === "function",
+        typeof (entry[1] as InitialAPI).connect === "function" &&
+        isOneAmWallet(entry[1] as InitialAPI),
     )
     .map(([id, api]) => ({ id, api }));
 }
@@ -80,11 +90,13 @@ function serializeErr(err: unknown): string {
   }
 }
 
-/**
- * Official examples assert networkId when present; they do not fail solely on
- * status === "disconnected" right after connect() (some wallets race here).
- */
 async function assertUsableConnection(api: ConnectedAPI): Promise<void> {
+  if (typeof api.getProvingProvider !== "function") {
+    throw new Error(
+      "Connected wallet does not support getProvingProvider(). CompactLab v1 requires 1AM (https://1am.xyz/).",
+    );
+  }
+
   if (typeof api.getConnectionStatus !== "function") return;
 
   let lastStatus: string | undefined;
@@ -100,18 +112,16 @@ async function assertUsableConnection(api: ConnectedAPI): Promise<void> {
       networkId = (cs as { networkId?: string }).networkId;
       if (lastStatus === "connected") break;
     } catch {
-      // Some wallets throw until fully ready — retry
+      // retry
     }
   }
 
   if (networkId && networkId !== TARGET_NETWORK) {
     throw new Error(
-      `Connected to network "${networkId}" but CompactLab expects ${TARGET_NETWORK}. Switch network in your wallet.`,
+      `Connected to network "${networkId}" but CompactLab expects ${TARGET_NETWORK}. Switch to Preprod in 1AM.`,
     );
   }
 
-  // Successful connect() + addresses below is enough; disconnected status is a
-  // known quirk on some wallets (e.g. 1AM) immediately after authorize.
   if (lastStatus && lastStatus !== "connected") {
     console.warn(
       `[compactlab] Wallet getConnectionStatus() → "${lastStatus}" after connect(); continuing if address APIs work.`,
@@ -131,7 +141,6 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
     setAvailableWallets(listMidnightWallets());
   }, []);
 
-  // Extensions often inject after first paint — poll briefly, then slowly.
   useEffect(() => {
     let attempts = 0;
     let timer: ReturnType<typeof setTimeout>;
@@ -159,6 +168,10 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
     setError(null);
 
     try {
+      if (!isOneAmWallet(wallet.api)) {
+        throw new Error("CompactLab v1 only supports the 1AM wallet (https://1am.xyz/).");
+      }
+
       const api: ConnectedAPI = await wallet.api.connect(TARGET_NETWORK);
       await assertUsableConnection(api);
 
@@ -166,7 +179,7 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
       const { unshieldedAddress } = await api.getUnshieldedAddress();
 
       setConnectedAPI(api);
-      setConnectedWalletName(wallet.api.name || wallet.id);
+      setConnectedWalletName(wallet.api.name || "1AM");
       setWalletInfo({
         shieldedAddress: addresses.shieldedAddress,
         shieldedCoinPublicKey: addresses.shieldedCoinPublicKey,
@@ -191,13 +204,13 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
     setAvailableWallets(wallets);
     if (wallets.length === 0) {
       setError(
-        "No Midnight wallet found. Install 1AM or Lace (Midnight), enable it for this site, then reload.",
+        "1AM wallet not found. Install 1AM from https://1am.xyz/, unlock it, enable this site, then reload.",
       );
       setStatus("error");
       return null;
     }
     if (wallets.length > 1) {
-      setError("Multiple Midnight wallets detected — choose one from the menu.");
+      setError("Multiple 1AM injections detected — choose one from the menu.");
       setStatus("error");
       return null;
     }

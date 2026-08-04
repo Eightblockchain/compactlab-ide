@@ -7,6 +7,9 @@
  * ledger-v8 calls fs.readFileSync at module load; in the browser Turbopack aliases
  * `fs` to an empty shim → "readFileSync is not a function" and /playground 500s.
  * Heavy Midnight SDK code is loaded via dynamic import() only when Deploy runs.
+ *
+ * v1 proving is delegated to the 1AM wallet (getProvingProvider) — no Docker
+ * proof server on the CompactLab host.
  */
 
 import type { ConnectedAPI } from "@midnight-ntwrk/dapp-connector-api";
@@ -28,82 +31,6 @@ export {
   type DeployableTemplate,
 };
 
-// ─── Proof server helpers ──────────────────────────────────────────────────────
-
-async function isProofServerHealthy(): Promise<boolean> {
-  try {
-    const res = await fetch("/api/proof/health", { signal: AbortSignal.timeout(4_000) });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
-export async function ensureProofServer(
-  log: (level: LogEntry["level"], message: string) => void,
-): Promise<boolean> {
-  if (await isProofServerHealthy()) {
-    log("info", "✓ Proof server is running.");
-    return true;
-  }
-
-  log("info", "Starting Docker proof server (midnightntwrk/proof-server)…");
-  log("info", "This may take a moment if the image needs to be pulled.");
-
-  let startOk = false;
-  try {
-    const res = await fetch("/api/proof/start", { method: "POST" });
-    const body = (await res.json()) as {
-      started: boolean;
-      alreadyRunning?: boolean;
-      error?: string;
-    };
-    if (!body.started) {
-      log("error", `Could not start proof server: ${body.error ?? "unknown error"}`);
-      if (body.error?.toLowerCase().includes("docker")) {
-        log("error", "Install Docker Desktop from https://docker.com and make sure it is running.");
-      }
-      return false;
-    }
-    startOk = true;
-    if (body.alreadyRunning) {
-      log("info", "Proof server container already exists — waiting for it to be ready…");
-    } else {
-      log("info", "✓ Container started. Waiting for proof server to be ready…");
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    log("error", `Could not reach /api/proof/start: ${msg}`);
-    log("error", "Start manually: docker run -p 6300:6300 midnightntwrk/proof-server");
-    return false;
-  }
-
-  if (!startOk) return false;
-
-  const deadline = Date.now() + 60_000;
-  let attempts = 0;
-  while (Date.now() < deadline) {
-    await new Promise((r) => setTimeout(r, 2_000));
-    attempts++;
-    if (await isProofServerHealthy()) {
-      log("info", `✓ Proof server is ready (${attempts * 2}s).`);
-      return true;
-    }
-    if (attempts % 5 === 0) {
-      log("info", `Still waiting for proof server… (${attempts * 2}s elapsed)`);
-    }
-  }
-
-  log("error", "Proof server did not become ready within 60 seconds.");
-  return false;
-}
-
-export async function checkProofServerHealthy(): Promise<boolean> {
-  return isProofServerHealthy();
-}
-
-// ─── Deploy ────────────────────────────────────────────────────────────────────
-
 export async function deployPlaygroundContract(
   connectedAPI: ConnectedAPI,
   template: string,
@@ -118,6 +45,13 @@ export async function deployPlaygroundContract(
   const t0 = Date.now();
   const log = (level: LogEntry["level"], message: string) =>
     addLog({ id: generateId(), timestamp: Date.now(), level, message, source: "network" });
+
+  if (typeof connectedAPI.getProvingProvider !== "function") {
+    const msg =
+      "Connected wallet cannot prove ZK transactions. CompactLab v1 requires 1AM (https://1am.xyz/).";
+    log("error", msg);
+    return { success: false, duration: Date.now() - t0, error: msg };
+  }
 
   const witnessSpecs = options?.witnessSpecs ?? [];
   const witnessValues = options?.witnessValues ?? {};
@@ -150,19 +84,10 @@ export async function deployPlaygroundContract(
     log("warn", "IDE --skip-zk compile does not change these assets. Use Compile (ZK) to deploy your edits.");
   }
 
-  const proofReady = await ensureProofServer(log);
-  if (!proofReady) {
-    return {
-      success: false,
-      duration: Date.now() - t0,
-      error: "Proof server could not be started. See network log for details.",
-    };
-  }
-
   log("info", "Connecting to Midnight Preprod…");
   log("info", `Indexer: ${PREPROD_CONFIG.indexerUri}`);
+  log("info", "ZK proving will run in the 1AM wallet (no local Docker proof server).");
 
-  // Dynamic import — keeps ledger-v8 out of the initial playground bundle
   const { createContractProviders, PlaygroundContractAPI } = await import(
     "@/lib/contract-runtime"
   );
@@ -178,11 +103,14 @@ export async function deployPlaygroundContract(
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     log("error", `Failed to initialise providers: ${msg}`);
+    if (msg.toLowerCase().includes("getprovingprovider") || msg.toLowerCase().includes("1am")) {
+      log("warn", "Install and connect 1AM from https://1am.xyz/ (Preprod).");
+    }
     return { success: false, duration: Date.now() - t0, error: `Provider setup failed: ${msg}` };
   }
 
   log("info", "Providers ready. Submitting deploy transaction…");
-  log("info", "⏳ ZK proofs via Docker proof server (localhost:6300). This may take 1–2 minutes.");
+  log("info", "ZK proof generation may take 1–2 minutes inside 1AM. Approve when prompted.");
 
   const api = new PlaygroundContractAPI(providers, slug, assetBase, {
     witnessSpecs,
@@ -190,9 +118,13 @@ export async function deployPlaygroundContract(
   });
 
   let contractAddress: string;
+  let transactionHash: string | undefined;
+  let blockNumber: number | undefined;
   try {
     const result = await api.deploy();
     contractAddress = String(result.contractAddress);
+    transactionHash = result.transactionHash;
+    blockNumber = result.blockNumber;
   } catch (err) {
     const serialize = (v: unknown, depth = 0): string => {
       if (depth > 4) return "[…]";
@@ -214,10 +146,6 @@ export async function deployPlaygroundContract(
     const msg = serialize(err);
     log("error", `Deploy transaction failed: ${msg}`);
     const lower = msg.toLowerCase();
-    if (lower.includes("proof server") || lower.includes("503") || lower.includes("cannot reach")) {
-      log("warn", "Cannot reach the local Docker proof server. Start it with:");
-      log("warn", "  docker run -p 6300:6300 midnightntwrk/proof-server");
-    }
     if (lower.includes("compact-runtime") || lower.includes("module specifier")) {
       log("warn", "Contract JS uses bare @midnight-ntwrk/compact-runtime imports; CompactLab rewrites them for the browser. Hard-refresh if you still see this.");
     }
@@ -230,16 +158,32 @@ export async function deployPlaygroundContract(
     if (lower.includes("balance") || lower.includes("insufficient") || lower.includes("funds")) {
       log("warn", "Insufficient tDUST on Preprod. Faucet: https://faucet.preprod.midnight.network/");
     }
+    if (lower.includes("1am") || lower.includes("proving") || lower.includes("getprovingprovider")) {
+      log("warn", "Ensure 1AM is unlocked on Preprod and approved proving for this site.");
+    }
     return { success: false, duration: Date.now() - t0, error: msg };
   }
 
   const duration = Date.now() - t0;
   log("success", `Contract deployed in ${(duration / 1000).toFixed(1)}s`);
   log("success", `Address: ${contractAddress}`);
+    log(
+      "info",
+      `View contract: https://explorer.1am.xyz/contract/${contractAddress}?network=preprod`,
+    );
+    if (transactionHash) {
+      log("info", `Tx: ${transactionHash}`);
+    }
+    log(
+      "warn",
+      "Click View contract in Network / Contract UI, or open the 1AM link above. Compact ids are hex, not Subscan accounts.",
+    );
 
   return {
     success: true,
     contractAddress,
+    transactionHash,
+    blockNumber,
     duration,
   };
 }
