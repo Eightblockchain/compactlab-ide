@@ -8,10 +8,10 @@ import { useLaceWallet, MIDNIGHT_WALLET_LINKS, listMidnightWallets } from "@/hoo
 import type { CompileResult, DeployResult } from "@/lib/compact";
 import { compileCompact, makeLog, extractWitnesses } from "@/lib/compact";
 import {
-  canDeployProject,
   deployPlaygroundContract,
-  checkProofServerHealthy,
 } from "@/lib/playground-deploy";
+import { getDeployGate, getLiveCompactSource } from "@/lib/deploy-gate";
+import { exportProjectZip, downloadBlob } from "@/lib/project-export";
 
 function countMidnightWallets(): number {
   return listMidnightWallets().length;
@@ -37,10 +37,11 @@ export function Topbar() {
     upsertGeneratedFiles,
     setCode,
     witnessValues,
+    activeFileId,
+    tabBuffers,
   } = useIDEStore();
 
   const lace = useLaceWallet();
-  const [proofHealthy, setProofHealthy] = useState<boolean | null>(null);
 
   useEffect(() => {
     if (lace.status === "connected" && lace.walletInfo) {
@@ -68,25 +69,12 @@ export function Topbar() {
     }
   }, [lace.status, lace.error, addLog, setLogTab, setBottomPanelOpen]);
 
-  useEffect(() => {
-    let cancelled = false;
-    const tick = async () => {
-      const ok = await checkProofServerHealthy();
-      if (!cancelled) setProofHealthy(ok);
-    };
-    void tick();
-    const id = setInterval(tick, 15_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, []);
-
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const [showWalletPicker, setShowWalletPicker] = useState(false);
   const walletPickerRef = useRef<HTMLDivElement>(null);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -195,7 +183,7 @@ export function Topbar() {
         addLog(
           makeLog(
             "info",
-            `On disk: public${result.artifactBaseUrl}/keys/ (proving keys are binary; stubs appear under contracts/managed/ in the sidebar).`,
+            `Stored privately under .data (served at ${result.artifactBaseUrl}/…).`,
             "compiler",
           ),
         );
@@ -234,21 +222,47 @@ export function Topbar() {
 
     const template = activeProject?.template ?? "";
     const artifactBaseUrl = activeProject?.artifactBaseUrl;
-    if (!canDeployProject(template, artifactBaseUrl)) {
-      setLogTab("network");
+    const compactSource = getLiveCompactSource({
+      files: activeProject?.files ?? [],
+      activeFileId,
+      code,
+      tabBuffers,
+    });
+    const gate = getDeployGate({
+      template,
+      artifactBaseUrl,
+      compiledSourceHash: activeProject?.compiledSourceHash,
+      currentSource: compactSource,
+    });
+
+    if (!gate.canDeploy) {
+      setLogTab("compile");
       setBottomPanelOpen(true);
-      addLog(
-        makeLog(
-          "error",
-          `Template "${template}" is not deployable. Use hello-world / counter, or run Compile first.`,
-          "network",
-        ),
-      );
+      addLog(makeLog("error", gate.reason, "compiler"));
+      if (gate.needsCompile) {
+        addLog(
+          makeLog(
+            "info",
+            "Click Compile (full ZK) to generate proving keys for your current source, then Deploy.",
+            "compiler",
+          ),
+        );
+      }
       return;
     }
 
     clearLogs();
     setBottomPanelOpen(true);
+
+    if (gate.usingBundled) {
+      addLog(
+        makeLog(
+          "info",
+          "Deploying bundled Preprod assets for this template (source matches the original). Edit + Compile to deploy your own keys.",
+          "network",
+        ),
+      );
+    }
 
     let connectedAPI = lace.connectedAPI;
     if (!connectedAPI) {
@@ -260,7 +274,7 @@ export function Topbar() {
           makeLog(
             "error",
             lace.error ??
-              "Could not connect. Install 1AM or Lace (Midnight), unlock it, approve this site, then retry.",
+              "Could not connect. Install 1AM from https://1am.xyz/, unlock it, approve this site, then retry.",
             "network",
           ),
         );
@@ -271,40 +285,44 @@ export function Topbar() {
 
     addLog(makeLog("info", "Need tDUST for fees: https://faucet.preprod.midnight.network/", "network"));
 
-    // Optional syntax check before deploy (skip-zk) — does not produce deploy assets
-    setLogTab("compile");
-    setStatus("compiling");
     const compactFile = activeProject?.files.find((f) => f.language === "compact");
     if (!compactFile) {
       addLog(makeLog("error", "No Compact contract file (.compact) found in this project.", "compiler"));
-      setStatus("idle");
       return;
     }
 
-    let compileResult: CompileResult;
-    try {
-      compileResult = await compileCompact(compactFile.content, {
-        projectId: activeProject?.id,
-        zk: false,
-      });
-      setCompileResult(compileResult);
-    } catch {
-      addLog(makeLog("error", "Compilation failed: could not reach compile service", "compiler"));
-      setStatus("idle");
-      return;
-    }
+    // Bundled Instant Deploy: skip server Compile (no CLI required).
+    // Edited / custom projects already gated to require full ZK Compile first.
+    if (!gate.usingBundled) {
+      setLogTab("compile");
+      setStatus("compiling");
+      let compileResult: CompileResult;
+      try {
+        compileResult = await compileCompact(compactFile.content, {
+          projectId: activeProject?.id,
+          zk: false,
+        });
+        setCompileResult(compileResult);
+      } catch {
+        addLog(makeLog("error", "Compilation failed: could not reach compile service", "compiler"));
+        setStatus("idle");
+        return;
+      }
 
-    if (!compileResult.success) {
-      const errCount = compileResult.errors?.length ?? 0;
-      addLog(makeLog("error", `Compilation failed: ${errCount} error(s). Fix before deploying.`, "compiler"));
-      compileResult.errors?.forEach((e) => {
-        addLog(makeLog("error", `Line ${e.line}, Col ${e.column}: ${e.message}`, "compiler"));
-      });
-      setStatus("idle");
-      return;
-    }
+      if (!compileResult.success) {
+        const errCount = compileResult.errors?.length ?? 0;
+        addLog(makeLog("error", `Compilation failed: ${errCount} error(s). Fix before deploying.`, "compiler"));
+        compileResult.errors?.forEach((e) => {
+          addLog(makeLog("error", `Line ${e.line}, Col ${e.column}: ${e.message}`, "compiler"));
+        });
+        setStatus("idle");
+        return;
+      }
 
-    addLog(makeLog("success", "Syntax/typecheck OK", "compiler"));
+      addLog(makeLog("success", "Syntax/typecheck OK", "compiler"));
+    } else {
+      addLog(makeLog("info", "Skipping server typecheck (bundled Instant Deploy).", "compiler"));
+    }
 
     // Witness *values* are not required at deploy (constructor typically does not
     // call them). Official bboard seeds a random private state bag for the SDK.
@@ -363,9 +381,40 @@ export function Topbar() {
   };
 
   const isRunning = status !== "idle";
-  const deployEnabled =
-    !isRunning &&
-    canDeployProject(activeProject?.template ?? "", activeProject?.artifactBaseUrl);
+  const liveSource = getLiveCompactSource({
+    files: activeProject?.files ?? [],
+    activeFileId,
+    code,
+    tabBuffers,
+  });
+  const deployGate = getDeployGate({
+    template: activeProject?.template ?? "",
+    artifactBaseUrl: activeProject?.artifactBaseUrl,
+    compiledSourceHash: activeProject?.compiledSourceHash,
+    currentSource: liveSource,
+  });
+  const deployEnabled = !isRunning && deployGate.canDeploy;
+
+  const handleExport = async () => {
+    if (!activeProject || exporting) return;
+    setExporting(true);
+    try {
+      const snap = {
+        ...activeProject,
+        files: activeProject.files.map((f) =>
+          activeFile && f.id === activeFile.id ? { ...f, content: code } : f,
+        ),
+      };
+      const blob = await exportProjectZip(snap);
+      downloadBlob(blob, `${snap.slug || "compact-project"}.zip`);
+      addLog(makeLog("success", `Exported ${snap.name} as zip`, "network"));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      addLog(makeLog("error", `Export failed: ${message}`, "network"));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <header className="h-14 flex items-center gap-2 px-4 bg-surface border-b border-border flex-shrink-0">
@@ -420,14 +469,14 @@ export function Topbar() {
 
       {/* Live status */}
       <div className="hidden md:flex items-center gap-3 text-xs mr-2">
-        <span className="flex items-center gap-1.5 text-text-muted" title="Docker proof server :6300">
+        <span className="flex items-center gap-1.5 text-text-muted" title="ZK proving via 1AM wallet">
           <span
             className={cn(
               "w-1.5 h-1.5 rounded-full",
-              proofHealthy === true ? "bg-success" : proofHealthy === false ? "bg-error" : "bg-text-dim",
+              lace.status === "connected" ? "bg-success" : "bg-text-dim",
             )}
           />
-          Proof {proofHealthy === true ? "up" : proofHealthy === false ? "down" : "…"}
+          Prove {lace.status === "connected" ? "1AM" : "off"}
         </span>
         <span className="flex items-center gap-1.5 text-text-muted">
           <span
@@ -508,16 +557,24 @@ export function Topbar() {
           loading={status === "deploying"}
           disabled={!deployEnabled}
           className="gap-1.5"
-          title={
-            deployEnabled
-              ? "Deploy to Midnight Preprod"
-              : "Only hello-world / counter (bundled) or projects after Compile with ZK artifacts"
-          }
+          title={deployGate.reason}
         >
           <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M6 1v7M3 5l3-4 3 4M1 10h10" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           Deploy
+        </Button>
+
+        <Button
+          variant="default"
+          size="md"
+          onClick={() => void handleExport()}
+          loading={exporting}
+          disabled={!activeProject || exporting || isRunning}
+          className="gap-1.5"
+          title="Download project as zip (source + deployment.json + managed keys if present)"
+        >
+          Export
         </Button>
 
         <Divider vertical className="mx-1 h-5" />
@@ -562,8 +619,8 @@ export function Topbar() {
                     ? `${lace.error} (click to retry)`
                     : "Connection failed (click to retry)"
                   : lace.isInstalled
-                    ? "Connect a Midnight wallet (Preprod)"
-                    : "No window.midnight wallet detected. Install 1AM or Lace (Midnight) and reload"
+                    ? "Connect 1AM wallet (Preprod)"
+                    : "1AM not detected. Install from https://1am.xyz/ and reload"
               }
             >
               {lace.status === "connecting"
@@ -571,17 +628,17 @@ export function Topbar() {
                 : lace.status === "error"
                   ? "Retry Wallet"
                   : !lace.isInstalled
-                    ? "Install Wallet ▾"
+                    ? "Install 1AM ▾"
                     : lace.availableWallets.length > 1
-                      ? "Connect Wallet ▾"
-                      : "Connect Wallet"}
+                      ? "Connect 1AM ▾"
+                      : "Connect 1AM"}
             </Button>
 
             {showWalletPicker && (
               <div className="absolute right-0 top-full mt-1 z-50 min-w-[220px] bg-surface-2 border border-border rounded-md shadow-lg overflow-hidden">
                 <div className="px-3 py-1.5 border-b border-border">
                   <span className="text-2xs text-text-muted uppercase tracking-wide">
-                    {lace.availableWallets.length > 0 ? "Choose wallet" : "Install a Midnight wallet"}
+                    {lace.availableWallets.length > 0 ? "Choose 1AM" : "Install 1AM"}
                   </span>
                 </div>
                 {lace.availableWallets.map((wallet) => (

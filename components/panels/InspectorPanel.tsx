@@ -11,7 +11,8 @@ import {
 import { cn, generateId } from "@/lib/utils";
 import type { PanelTab } from "@/store/ide";
 import { useLaceWallet } from "@/hooks/useLaceWallet";
-import { canDeployProject } from "@/lib/playground-assets";
+import { getDeployGate, getLiveCompactSource } from "@/lib/deploy-gate";
+import { oneAmContractUrl } from "@/lib/explorers";
 import {
   bytesLengthFromType,
   generateBytesHex,
@@ -180,6 +181,8 @@ function ContractUITab() {
     code,
     status,
     activeProject,
+    activeFileId,
+    tabBuffers,
     addLog,
     clearLogs,
     setLogTab,
@@ -266,10 +269,22 @@ function ContractUITab() {
   const ledgerVars = extractLedgerVars(code);
 
   const template = activeProject?.template ?? "";
+  const liveSource = getLiveCompactSource({
+    files: activeProject?.files ?? [],
+    activeFileId,
+    code,
+    tabBuffers,
+  });
+  const deployGate = getDeployGate({
+    template,
+    artifactBaseUrl: activeProject?.artifactBaseUrl,
+    compiledSourceHash: activeProject?.compiledSourceHash,
+    currentSource: liveSource,
+  });
   const canCallOnChain =
     !!lace.connectedAPI &&
     !!activeAddress &&
-    canDeployProject(template, activeProject?.artifactBaseUrl) &&
+    deployGate.canDeploy &&
     !witnessErr;
 
   const justDeployed = !!deployResult?.success && !!deployResult.contractAddress;
@@ -281,9 +296,9 @@ function ContractUITab() {
   const callBlockedReason = !activeAddress
     ? "Deploy a contract first (toolbar → Deploy)."
     : !lace.connectedAPI
-      ? "Connect a Midnight wallet to send transactions."
-      : !canDeployProject(template, activeProject?.artifactBaseUrl)
-        ? `“${template}” needs Compile first, or open Hello Midnight / Counter.`
+      ? "Connect 1AM to send transactions."
+      : !deployGate.canDeploy
+        ? deployGate.reason
         : witnessErr
           ? witnessErr
           : null;
@@ -389,7 +404,7 @@ function ContractUITab() {
   return (
     <div className="p-4 space-y-5">
       {justDeployed && (
-        <div className="p-3 rounded-lg border border-success/25 bg-success/8 space-y-1.5">
+        <div className="p-3 rounded-lg border border-success/25 bg-success/8 space-y-2">
           <p className="text-sm font-medium text-success">Contract deployed</p>
           <p className="text-xs text-text-secondary leading-relaxed">
             {lace.connectedAPI
@@ -398,11 +413,26 @@ function ContractUITab() {
                 : "Next: call a circuit below. Proofs take 1-2 minutes."
               : "Connect a Midnight wallet (toolbar or button below), then call a circuit."}
           </p>
-          {!lace.connectedAPI && (
-            <Button size="sm" variant="accent" className="mt-1" onClick={() => void lace.connect()}>
-              Connect Wallet
-            </Button>
-          )}
+          <div className="flex flex-wrap gap-2 pt-0.5">
+            {deployResult?.contractAddress && (
+              <a
+                href={oneAmContractUrl(deployResult.contractAddress)}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-white bg-accent hover:opacity-90 transition-opacity"
+              >
+                View on explorer
+                <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" className="w-3 h-3">
+                  <path d="M5 2H2.5A1.5 1.5 0 001 3.5v6A1.5 1.5 0 002.5 11h6A1.5 1.5 0 0010 9.5V7M7 1h4v4M11 1L5.5 6.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </a>
+            )}
+            {!lace.connectedAPI && (
+              <Button size="sm" variant="accent" onClick={() => void lace.connect()}>
+                Connect 1AM
+              </Button>
+            )}
+          </div>
         </div>
       )}
 
@@ -429,12 +459,26 @@ function ContractUITab() {
           {activeAddress ? (
             <div className="flex items-center gap-2 flex-wrap">
               <StatusDot status={contractInfo ? "success" : stateError ? "error" : "idle"} />
-              <span className="text-xs font-mono text-text-secondary select-all">
+              <a
+                href={oneAmContractUrl(activeAddress)}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs font-mono text-accent hover:underline select-all"
+                title="View contract on 1AM Explorer"
+              >
                 {activeAddress.slice(0, 14)}…{activeAddress.slice(-8)}
-              </span>
+              </a>
               <Badge variant="info" size="sm">
                 preprod
               </Badge>
+              <a
+                href={oneAmContractUrl(activeAddress)}
+                target="_blank"
+                rel="noreferrer"
+                className="text-2xs text-accent hover:underline font-medium"
+              >
+                View contract ↗
+              </a>
             </div>
           ) : (
             <p className="text-2xs text-text-dim leading-relaxed">
@@ -572,7 +616,7 @@ function ContractUITab() {
             <p>{callBlockedReason}</p>
             {activeAddress && !lace.connectedAPI && (
               <Button size="sm" variant="accent" onClick={() => void lace.connect()}>
-                Connect Wallet
+                Connect 1AM
               </Button>
             )}
           </div>

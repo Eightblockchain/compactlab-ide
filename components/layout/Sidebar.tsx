@@ -679,10 +679,10 @@ export function Sidebar() {
                   <span
                     className={cn(
                       "text-2xs px-1.5 py-0.5 rounded font-medium",
-                      deployable ? "text-success bg-success/10" : "text-text-muted bg-white/5",
+                      deployable ? "text-success bg-success/10" : "text-warning bg-warning/10",
                     )}
                   >
-                    {deployable ? "Deployable" : "Compile only"}
+                    {deployable ? "Instant deploy" : "Needs Compile"}
                   </span>
                 </div>
               </button>

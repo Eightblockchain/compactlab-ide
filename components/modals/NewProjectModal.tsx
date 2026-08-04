@@ -166,7 +166,11 @@ function ModalContent({ initialTemplate, onClose }: { initialTemplate: string; o
   }, []);
 
   const slugPreview = name.trim() ? slugify(name.trim()) : "my-project";
-  const templates = Object.entries(COMPACT_TEMPLATES);
+  const templates = Object.entries(COMPACT_TEMPLATES).sort(([a], [b]) => {
+    const rank = (id: string) =>
+      id === "blank" ? 0 : isDeployableTemplate(id) ? 1 : 2;
+    return rank(a) - rank(b) || a.localeCompare(b);
+  });
   const selectedFiles =
     COMPACT_TEMPLATES[selectedTemplate as keyof typeof COMPACT_TEMPLATES]?.files ?? [];
 
@@ -197,7 +201,9 @@ function ModalContent({ initialTemplate, onClose }: { initialTemplate: string; o
           </div>
           <div>
             <h2 className="text-sm font-semibold text-text-primary leading-none">New Project</h2>
-            <p className="text-xs text-text-muted mt-0.5">Creates a scoped folder with your contract files</p>
+            <p className="text-xs text-text-muted mt-0.5">
+              From scratch or a template · Compile · Deploy with 1AM
+            </p>
           </div>
         </div>
         <button
@@ -297,10 +303,10 @@ function ModalContent({ initialTemplate, onClose }: { initialTemplate: string; o
                         "text-2xs font-medium px-1.5 py-0.5 rounded-sm",
                         isDeployableTemplate(id)
                           ? "text-success bg-success/12"
-                          : "text-text-muted bg-white/5",
+                          : "text-warning bg-warning/12",
                       )}
                     >
-                      {isDeployableTemplate(id) ? "Deployable" : "Compile only"}
+                      {isDeployableTemplate(id) ? "Instant deploy" : "Needs Compile"}
                     </span>
                   </div>
                   {isSelected && (

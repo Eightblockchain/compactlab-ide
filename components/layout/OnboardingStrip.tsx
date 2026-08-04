@@ -2,24 +2,27 @@
 
 import { useEffect, useState } from "react";
 import { useLaceWallet, MIDNIGHT_WALLET_LINKS } from "@/hooks/useLaceWallet";
-import { checkProofServerHealthy } from "@/lib/playground-deploy";
+import { useIDEStore } from "@/store/ide";
+import { getDeployGate, getLiveCompactSource } from "@/lib/deploy-gate";
 import { cn } from "@/lib/utils";
 
 interface Checks {
   compact: boolean | null;
-  proof: boolean | null;
+  compileEnabled: boolean | null;
   wallet: boolean | null;
 }
 
 /**
- * Beginner-first happy path: Open Hello → Connect wallet → Fund → Deploy → Call.
+ * Two lanes: quick start (bundled Hello/Counter) or from-scratch (template → Compile → Deploy).
  */
 export function OnboardingStrip() {
   const wallet = useLaceWallet();
+  const { activeProject, activeFileId, code, tabBuffers, setNewProjectModalOpen, loadProject, projects } =
+    useIDEStore();
   const [dismissed, setDismissed] = useState(false);
   const [checks, setChecks] = useState<Checks>({
     compact: null,
-    proof: null,
+    compileEnabled: null,
     wallet: null,
   });
 
@@ -37,17 +40,23 @@ export function OnboardingStrip() {
     let cancelled = false;
     const run = async () => {
       let compact: boolean | null = null;
+      let compileEnabled: boolean | null = null;
       try {
         const res = await fetch("/api/compile", { method: "GET" });
-        compact = res.ok;
+        const body = (await res.json().catch(() => ({}))) as {
+          available?: boolean;
+          compileEnabled?: boolean;
+        };
+        compileEnabled = body.compileEnabled ?? true;
+        compact = compileEnabled === false ? true : res.ok && body.available !== false;
       } catch {
         compact = false;
+        compileEnabled = null;
       }
-      const proof = await checkProofServerHealthy();
       if (!cancelled) {
         setChecks({
           compact,
-          proof,
+          compileEnabled,
           wallet: wallet.isInstalled || wallet.status === "connected",
         });
       }
@@ -63,7 +72,20 @@ export function OnboardingStrip() {
   if (dismissed) return null;
 
   const walletOk = wallet.status === "connected";
-  const readyToDeploy = walletOk && checks.proof !== false;
+  const liveSource = getLiveCompactSource({
+    files: activeProject?.files ?? [],
+    activeFileId,
+    code,
+    tabBuffers,
+  });
+  const gate = getDeployGate({
+    template: activeProject?.template ?? "",
+    artifactBaseUrl: activeProject?.artifactBaseUrl,
+    compiledSourceHash: activeProject?.compiledSourceHash,
+    currentSource: liveSource,
+  });
+  const readyToDeploy = walletOk && gate.canDeploy;
+  const needsCompile = gate.needsCompile;
 
   const dismiss = () => {
     setDismissed(true);
@@ -72,6 +94,12 @@ export function OnboardingStrip() {
     } catch {
       /* ignore */
     }
+  };
+
+  const openHello = () => {
+    const hello = projects.find((p) => p.template === "hello-world");
+    if (hello) loadProject(hello.id);
+    else setNewProjectModalOpen(true, "hello-world");
   };
 
   return (
@@ -83,29 +111,41 @@ export function OnboardingStrip() {
     >
       <div className="flex items-center gap-3 flex-wrap">
         <span className="text-text-muted font-medium uppercase tracking-wide flex-shrink-0">
-          Learn Compact
+          Get started
         </span>
         <span className="text-text-secondary">
-          <span className="text-text-muted">1.</span> Open{" "}
-          <span className="text-text-primary font-medium">Hello, Midnight!</span>
+          <button type="button" onClick={openHello} className="text-accent hover:underline font-medium">
+            Hello World
+          </button>
+          <span className="text-text-dim mx-1">or</span>
+          <button
+            type="button"
+            onClick={() => setNewProjectModalOpen(true, "blank")}
+            className="text-accent hover:underline font-medium"
+          >
+            New project
+          </button>
           <span className="text-text-dim mx-1.5">→</span>
-          <span className="text-text-muted">2.</span> Connect wallet
+          Connect 1AM
           <span className="text-text-dim mx-1.5">→</span>
-          <span className="text-text-muted">3.</span>{" "}
           <a
             href="https://faucet.preprod.midnight.network/"
             target="_blank"
             rel="noreferrer"
             className="text-accent hover:underline"
           >
-            Get free tDUST
+            tDUST
           </a>
           <span className="text-text-dim mx-1.5">→</span>
-          <span className="text-text-muted">4.</span>{" "}
+          {needsCompile ? (
+            <>
+              <span className="text-text-primary font-medium">Compile</span>
+              <span className="text-text-dim mx-1.5">→</span>
+            </>
+          ) : null}
           <span className="text-text-primary font-medium">Deploy</span>
           <span className="text-text-dim mx-1.5">→</span>
-          <span className="text-text-muted">5.</span>{" "}
-          <span className="text-text-primary font-medium">Call a circuit</span>
+          <span className="text-text-primary font-medium">Call</span>
         </span>
         <div className="flex-1" />
         <button
@@ -121,27 +161,38 @@ export function OnboardingStrip() {
         <span className="text-2xs text-text-dim uppercase tracking-wide flex-shrink-0">Needs</span>
         <Check
           ok={walletOk ? true : checks.wallet}
-          label={
-            walletOk
-              ? `${wallet.connectedWalletName ?? "Wallet"} connected`
-              : "Midnight wallet"
-          }
+          label={walletOk ? "1AM connected" : "1AM wallet"}
           href={MIDNIGHT_WALLET_LINKS[0].href}
           onAction={!walletOk && checks.wallet ? () => void wallet.connect() : undefined}
         />
         <Check
-          ok={checks.proof}
-          label="Proof server"
-          hint="Auto-starts on Deploy, or: docker run -p 6300:6300 midnightntwrk/proof-server"
-        />
-        <Check
-          ok={checks.compact}
-          label="Compact CLI"
+          ok={
+            checks.compileEnabled === false
+              ? true
+              : checks.compact
+          }
+          label={
+            checks.compileEnabled === false
+              ? "Instant Deploy ready"
+              : "Compact CLI"
+          }
           href="https://docs.midnight.network/"
-          hint="Only needed to Compile your own edits"
+          hint={
+            checks.compileEnabled === false
+              ? "Server Compile is off. Use unedited Hello/Counter, or enable COMPACTLAB_ENABLE_COMPILE on the host."
+              : needsCompile
+                ? "Required to Compile this project before Deploy"
+                : "Optional for unedited Hello/Counter; required for your own contracts"
+          }
         />
         {readyToDeploy && (
           <span className="text-success flex-shrink-0">Ready. Click Deploy</span>
+        )}
+        {!readyToDeploy && walletOk && needsCompile && (
+          <span className="text-warning flex-shrink-0">Run Compile, then Deploy</span>
+        )}
+        {!walletOk && (
+          <span className="text-text-muted flex-shrink-0">Connect 1AM to deploy</span>
         )}
       </div>
     </div>

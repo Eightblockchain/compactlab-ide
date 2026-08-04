@@ -6,6 +6,7 @@ import { Tabs, Badge, Button, IconButton, StatusDot } from "@/components/ui";
 import { cn, formatTimestamp } from "@/lib/utils";
 import type { LogEntry } from "@/lib/compact";
 import type { LogTab } from "@/store/ide";
+import { oneAmContractUrl, oneAmTxUrl } from "@/lib/explorers";
 
 export function BottomPanel() {
   const { logTab, setLogTab, bottomPanelOpen, setBottomPanelOpen, logs, clearLogs } = useIDEStore();
@@ -343,9 +344,15 @@ function NetworkPanel() {
               <div>
                 <p className="text-2xs text-text-muted mb-1">Contract Address</p>
                 <div className="flex items-center gap-2">
-                  <code className="text-xs font-mono text-success break-all flex-1">
+                  <a
+                    href={oneAmContractUrl(deployResult.contractAddress)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs font-mono text-success break-all flex-1 hover:underline"
+                    title="View contract on 1AM Explorer (Preprod)"
+                  >
                     {deployResult.contractAddress}
-                  </code>
+                  </a>
                   <button
                     onClick={() => navigator.clipboard.writeText(deployResult.contractAddress!)}
                     className="flex-shrink-0 text-text-muted hover:text-text-primary transition-colors"
@@ -357,15 +364,46 @@ function NetworkPanel() {
                     </svg>
                   </button>
                 </div>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <a
+                    href={oneAmContractUrl(deployResult.contractAddress)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-white bg-accent hover:opacity-90 transition-opacity"
+                  >
+                    View contract
+                    <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" className="w-3 h-3">
+                      <path d="M5 2H2.5A1.5 1.5 0 001 3.5v6A1.5 1.5 0 002.5 11h6A1.5 1.5 0 0010 9.5V7M7 1h4v4M11 1L5.5 6.5" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                  </a>
+                  {deployResult.transactionHash && (
+                    <a
+                      href={oneAmTxUrl(deployResult.transactionHash)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-2xs text-accent hover:underline"
+                    >
+                      View deploy tx ↗
+                    </a>
+                  )}
+                </div>
+                <p className="text-2xs text-text-dim mt-1.5">
+                  Opens 1AM Preprod explorer. Compact contracts are hex ids, not wallet accounts.
+                </p>
               </div>
             )}
 
             {deployResult.transactionHash && (
               <div>
                 <p className="text-2xs text-text-muted mb-1">Transaction Hash</p>
-                <code className="text-2xs font-mono text-text-secondary break-all">
+                <a
+                  href={oneAmTxUrl(deployResult.transactionHash)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-2xs font-mono text-text-secondary break-all hover:text-accent hover:underline"
+                >
                   {deployResult.transactionHash}
-                </code>
+                </a>
               </div>
             )}
 
