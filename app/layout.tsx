@@ -4,7 +4,7 @@ import { Providers } from "./providers";
 
 export const metadata: Metadata = {
   title: "CompactLab — Midnight Smart Contract IDE",
-  description: "Browser-based IDE for writing, simulating, and deploying Compact smart contracts on the Midnight ecosystem.",
+  description: "Browser-based IDE for writing, compiling, and deploying Compact smart contracts on Midnight Preprod.",
 };
 
 export default function RootLayout({
@@ -14,7 +14,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full">
-      <body className="h-full overflow-hidden bg-background text-text-primary antialiased">
+      <body className="h-full overflow-hidden bg-background text-text-primary antialiased" suppressHydrationWarning>
         <Providers>{children}</Providers>
       </body>
     </html>

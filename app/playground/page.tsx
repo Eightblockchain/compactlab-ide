@@ -8,6 +8,7 @@ import {
 } from "react-resizable-panels";
 import { useIDEStore } from "@/store/ide";
 import { Topbar } from "@/components/layout/Topbar";
+import { OnboardingStrip } from "@/components/layout/OnboardingStrip";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { CompactEditor } from "@/components/editor/CompactEditor";
 import { InspectorPanel } from "@/components/panels/InspectorPanel";
@@ -60,8 +61,8 @@ export default function PlaygroundPage() {
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-surface">
-      {/* Fixed topbar */}
       <Topbar />
+      <OnboardingStrip />
 
       {/* Main IDE body — flex-1 + min-h-0 are critical for nested panels */}
       <div className="flex-1 min-h-0 overflow-hidden">

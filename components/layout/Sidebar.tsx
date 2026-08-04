@@ -8,6 +8,7 @@ import { FileIcon, FolderIcon, MidnightIcon, getFolderColor } from "@/components
 import { cn } from "@/lib/utils";
 import { COMPACT_TEMPLATES } from "@/lib/constants";
 import { APP_VERSION } from "@/lib/version";
+import { isDeployableTemplate } from "@/lib/playground-deploy";
 
 const _MODULE_NOW = Date.now();
 
@@ -512,88 +513,9 @@ function ProjectFolderItem({
   );
 }
 
-// ─── Packages Tab ──────────────────────────────────────────────────────────────
-
-const MIDNIGHT_PACKAGES: Array<{ name: string; version: string; description: string; type: "sdk" | "runtime" | "tool" }> = [
-  { name: "@midnight-ntwrk/compact-runtime", version: "0.15.0", description: "Compact contract runtime (WASM)", type: "runtime" },
-  { name: "@midnight-ntwrk/midnight-js-contracts", version: "4.0.4", description: "Deploy, call, and find contracts", type: "sdk" },
-  { name: "@midnight-ntwrk/midnight-js-types", version: "4.0.4", description: "Core SDK types", type: "sdk" },
-  { name: "@midnight-ntwrk/dapp-connector-api", version: "4.0.1", description: "Lace wallet connector API", type: "sdk" },
-  { name: "@midnight-ntwrk/midnight-js-dapp-connector-proof-provider", version: "4.0.4", description: "ZK proof delegation to Lace wallet", type: "sdk" },
-  { name: "@midnight-ntwrk/midnight-js-fetch-zk-config-provider", version: "4.0.4", description: "Fetch ZK config from network", type: "sdk" },
-  { name: "@midnight-ntwrk/midnight-js-level-private-state-provider", version: "4.0.4", description: "LevelDB private state storage", type: "sdk" },
-  { name: "@midnight-ntwrk/midnight-js-indexer-public-data-provider", version: "4.0.4", description: "Indexer public data provider", type: "sdk" },
-  { name: "@midnight-ntwrk/midnight-js-network-id", version: "4.0.4", description: "Network ID utilities", type: "sdk" },
-  { name: "@midnight-ntwrk/midnight-js-utils", version: "4.0.4", description: "Transaction serialization utilities", type: "sdk" },
-  { name: "@midnight-ntwrk/ledger-v8", version: "auto", description: "On-chain runtime WASM (auto-installed)", type: "runtime" },
-];
-
-function PackagesTab() {
-  return (
-    <div className="p-3 space-y-4">
-      {/* Compact compiler info */}
-      <div>
-        <p className="text-2xs font-semibold text-text-dim uppercase tracking-widest mb-2">Compiler</p>
-        <div
-          className="flex items-center justify-between px-3 py-2.5 rounded-md"
-          style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}
-        >
-          <div className="min-w-0">
-            <p className="text-xs font-mono text-text-primary">compact</p>
-            <p className="text-2xs text-text-muted mt-0.5">Compact language compiler</p>
-          </div>
-          <span className="text-2xs font-mono text-accent flex-shrink-0 ml-2">0.4.0</span>
-        </div>
-      </div>
-
-      {/* SDK packages */}
-      <div>
-        <p className="text-2xs font-semibold text-text-dim uppercase tracking-widest mb-2">Midnight SDK</p>
-        <div className="space-y-1">
-          {MIDNIGHT_PACKAGES.map((pkg) => (
-            <div
-              key={pkg.name}
-              className="flex items-start justify-between gap-2 px-3 py-2 rounded-md group"
-              style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}
-            >
-              <div className="min-w-0 flex-1">
-                <p className="text-2xs font-mono text-text-secondary truncate leading-relaxed" title={pkg.name}>
-                  {pkg.name.replace("@midnight-ntwrk/", "@mn/")}
-                </p>
-                <p className="text-2xs text-text-dim mt-0.5 leading-relaxed">{pkg.description}</p>
-              </div>
-              <span className="text-2xs font-mono text-text-muted flex-shrink-0 mt-0.5">{pkg.version}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Network info */}
-      <div>
-        <p className="text-2xs font-semibold text-text-dim uppercase tracking-widest mb-2">Network</p>
-        <div
-          className="px-3 py-2.5 rounded-md space-y-1"
-          style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.05)" }}
-        >
-          <div className="flex items-center justify-between">
-            <span className="text-2xs text-text-muted">Network</span>
-            <span className="text-2xs font-mono text-accent">Preprod</span>
-          </div>
-          <div className="flex items-center justify-between">
-            <span className="text-2xs text-text-muted">Indexer</span>
-            <span className="text-2xs font-mono text-text-secondary truncate max-w-24 text-right" title="indexer.preprod.midnight.network">
-              indexer.preprod.midnight.network
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Main sidebar ──────────────────────────────────────────────────────────────
 
-type SidebarTab = "projects" | "templates" | "packages";
+type SidebarTab = "projects" | "templates";
 
 export function Sidebar() {
   const [tab, setTab] = useState<SidebarTab>("projects");
@@ -681,15 +603,6 @@ export function Sidebar() {
           >
             Templates
           </button>
-          <button
-            onClick={() => setTab("packages")}
-            className={cn(
-              "text-sm font-medium px-2.5 py-1 rounded transition-colors",
-              tab === "packages" ? "bg-white/6 text-text-primary" : "text-text-secondary hover:text-text-primary",
-            )}
-          >
-            Packages
-          </button>
         </div>
         {tab === "projects" && (
           <IconButton size="sm" title="New project" onClick={() => setNewProjectModalOpen(true, "blank")}>
@@ -743,7 +656,9 @@ export function Sidebar() {
 
         {tab === "templates" && (
           <div className="p-2 space-y-1.5">
-            {templates.map((tpl) => (
+            {templates.map((tpl) => {
+              const deployable = isDeployableTemplate(tpl.id);
+              return (
               <button
                 key={tpl.id}
                 onClick={() => { createProject(tpl.name, tpl.id, tpl.description); setTab("projects"); }}
@@ -759,15 +674,22 @@ export function Sidebar() {
                   </div>
                   <MidnightIcon size={18} />
                 </div>
-                <div className="mt-2">
+                <div className="mt-2 flex items-center gap-1.5">
                   <TemplateTag difficulty={tpl.difficulty} />
+                  <span
+                    className={cn(
+                      "text-2xs px-1.5 py-0.5 rounded font-medium",
+                      deployable ? "text-success bg-success/10" : "text-text-muted bg-white/5",
+                    )}
+                  >
+                    {deployable ? "Deployable" : "Compile only"}
+                  </span>
                 </div>
               </button>
-            ))}
+              );
+            })}
           </div>
         )}
-
-        {tab === "packages" && <PackagesTab />}
       </div>
 
       {/* Footer */}

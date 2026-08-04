@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useIDEStore } from "@/store/ide";
 import { COMPACT_TEMPLATES } from "@/lib/constants";
 import { cn, slugify } from "@/lib/utils";
+import { isDeployableTemplate } from "@/lib/playground-deploy";
 
 // ─── Template metadata ─────────────────────────────────────────────────────────
 
@@ -225,17 +226,14 @@ function ModalContent({ initialTemplate, onClose }: { initialTemplate: string; o
             onFocus={(e) => (e.currentTarget.style.borderColor = "rgba(240,99,88,0.45)")}
             onBlur={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)")}
           />
-          {/* Folder preview */}
+          {/* Browser-local project id preview (not a real filesystem path) */}
           <div
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md"
             style={{ background: "rgba(255,255,255,0.03)" }}
           >
-            <svg viewBox="0 0 12 12" fill="none" className="w-3 h-3 text-text-muted flex-shrink-0" stroke="currentColor" strokeWidth="1.2">
-              <path d="M1 3.5h4l1 1h5v5.5H1V3.5z" strokeLinejoin="round" />
-            </svg>
-            <span className="font-mono text-xs text-text-muted">~/compactlab/</span>
+            <span className="font-mono text-xs text-text-muted">browser project:</span>
             <span className="font-mono text-xs" style={{ color: name.trim() ? "#F06358" : "#636360" }}>
-              {slugPreview}/
+              {slugPreview || "…"}
             </span>
           </div>
         </div>
@@ -290,9 +288,19 @@ function ModalContent({ initialTemplate, onClose }: { initialTemplate: string; o
                     {tpl.name}
                   </p>
                   <p className="text-2xs text-text-muted leading-relaxed line-clamp-2">{tpl.description}</p>
-                  <div className="mt-2.5">
+                  <div className="mt-2.5 flex flex-wrap gap-1.5">
                     <span className={cn("text-2xs font-medium px-1.5 py-0.5 rounded-sm", meta?.tagColor ?? "text-text-muted bg-white/5")}>
                       {meta?.tag}
+                    </span>
+                    <span
+                      className={cn(
+                        "text-2xs font-medium px-1.5 py-0.5 rounded-sm",
+                        isDeployableTemplate(id)
+                          ? "text-success bg-success/12"
+                          : "text-text-muted bg-white/5",
+                      )}
+                    >
+                      {isDeployableTemplate(id) ? "Deployable" : "Compile only"}
                     </span>
                   </div>
                   {isSelected && (

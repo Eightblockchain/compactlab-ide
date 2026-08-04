@@ -315,8 +315,9 @@ export function registerCompactLanguage(monaco: typeof Monaco) {
         {
           label: "pragma",
           kind: monaco.languages.CompletionItemKind.Snippet,
-          insertText: "pragma language_version >= 0.21;",
-          documentation: "Add language version pragma",
+          insertText: "pragma language_version >= 0.22;",
+          documentation:
+            "Language version pragma. CompactLab’s compiler package +0.30.0 implements language 0.22.0.",
           range,
         },
         {

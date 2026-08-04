@@ -169,9 +169,17 @@ function CompilePanel() {
             </div>
             <div>
               <p className={cn("text-sm font-medium", compileResult.success ? "text-success" : "text-error")}>
-                {compileResult.success ? "Compilation successful" : "Compilation failed"}
+                {compileResult.success
+                  ? (compileResult.skipZk
+                    ? "Typecheck OK (--skip-zk, no proving keys)"
+                    : "Full Compact compile OK")
+                  : "Compilation failed"}
               </p>
-              <p className="text-xs text-text-muted mt-0.5">{compileResult.duration}ms</p>
+              <p className="text-xs text-text-muted mt-0.5">
+                {compileResult.duration}ms
+                {compileResult.compilerVersion ? ` · compact ${compileResult.compilerVersion}` : ""}
+                {compileResult.artifactBaseUrl ? ` · ${compileResult.artifactBaseUrl}` : ""}
+              </p>
             </div>
           </div>
 
@@ -179,9 +187,9 @@ function CompilePanel() {
           {compileResult.success && (
             <div className="grid grid-cols-3 gap-2">
               <StatCard
-                label="Constraints"
-                value={compileResult.constraintCount?.toLocaleString() ?? "—"}
-                color="accent"
+                label="Keys"
+                value={String(compileResult.artifacts?.keys.length ?? (compileResult.skipZk ? 0 : "—"))}
+                color={compileResult.artifacts?.keys.length ? "accent" : "warning"}
               />
               <StatCard
                 label="Circuits"
@@ -193,6 +201,15 @@ function CompilePanel() {
                 value={String(compileResult.warnings?.length ?? 0)}
                 color={compileResult.warnings?.length ? "warning" : "muted"}
               />
+            </div>
+          )}
+
+          {compileResult.success && compileResult.artifacts && (
+            <div className="text-xs font-mono text-text-secondary space-y-1 p-3 bg-surface-2 border border-border rounded-md">
+              <p>contract/: {compileResult.artifacts.contract.join(", ") || "—"}</p>
+              <p>keys/: {compileResult.artifacts.keys.join(", ") || "(empty — not deployable)"}</p>
+              <p>zkir/: {compileResult.artifacts.zkir.join(", ") || "—"}</p>
+              <p>compiler/: {compileResult.artifacts.compiler.join(", ") || "—"}</p>
             </div>
           )}
 
@@ -279,7 +296,7 @@ function NetworkPanel() {
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-xs text-text-muted">Balance</span>
-                <span className="text-xs font-mono text-text-primary">{wallet.balance}</span>
+                <span className="text-xs font-mono text-text-primary">{wallet.balance ?? "—"}</span>
               </div>
               <div className="flex items-center justify-between">
                 <span className="text-xs text-text-muted">Network</span>
@@ -295,7 +312,7 @@ function NetworkPanel() {
         <div className="flex items-center gap-3 p-4 bg-accent/5 border border-accent/15 rounded-md">
           <div className="w-5 h-5 rounded-full border-2 border-accent border-t-transparent animate-spin flex-shrink-0" />
           <div>
-            <p className="text-sm font-medium text-text-primary">Deploying to Midnight Devnet…</p>
+            <p className="text-sm font-medium text-text-primary">Deploying to Midnight Preprod…</p>
             <p className="text-xs text-text-muted mt-0.5">Submitting contract and waiting for confirmation</p>
           </div>
         </div>

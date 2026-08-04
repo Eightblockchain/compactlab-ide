@@ -22,7 +22,7 @@ export interface TemplateFolder {
 
 export interface TemplateFile {
   name: string;
-  language: "compact" | "markdown" | "json" | "javascript" | "typescript" | "yaml";
+  language: "compact" | "markdown" | "json" | "javascript" | "typescript" | "yaml" | "text";
   content: string;
   /** Must match a TemplateFolder.name, or omit for root */
   folder?: string;
@@ -51,7 +51,7 @@ export const COMPACT_TEMPLATES: Record<TemplateKey, CompactTemplate> = {
         name: "hello-world.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.20;
+        content: `pragma language_version >= 0.22;
 
 import CompactStandardLibrary;
 
@@ -292,13 +292,13 @@ to the ledger from a parameter — protecting against accidental data leaks.
     name: "Counter",
     description: "On-chain counter using the built-in Counter type",
     difficulty: "beginner",
-    tags: ["Counter", "Uint<64>", "increment"],
+    tags: ["Counter", "Uint<16>", "increment", "disclose"],
     files: [
       {
         name: "counter.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.20;
+        content: `pragma language_version >= 0.22;
 
 import CompactStandardLibrary;
 
@@ -322,8 +322,8 @@ export circuit increment(): [] {
 }
 
 // Add a custom amount. Caller provides the value as a circuit parameter.
-export circuit incrementBy(amount: Uint<64>): [] {
-  round.increment(amount);
+export circuit incrementBy(amount: Uint<16>): [] {
+  round.increment(disclose(amount));
 }
 `,
       },
@@ -340,13 +340,15 @@ An on-chain counter backed by Compact's built-in \`Counter\` ledger type.
 |---|---|
 | Built-in Counter type | \`export ledger round: Counter;\` |
 | Append-only increment | \`round.increment(1);\` |
-| Circuit parameter | \`export circuit incrementBy(amount: Uint<64>): []\` |
+| Circuit parameter | \`export circuit incrementBy(amount: Uint<16>): []\` |
+| disclose for params | \`round.increment(disclose(amount));\` |
 
 ## Notes
 
 - \`Counter\` can never be decremented or reset — it is strictly monotonic
 - Each call to \`increment\` or \`incrementBy\` produces a ZK proof on-chain
 - The current value of \`round\` is readable by anyone via the Midnight indexer
+- This template is **deployable** from CompactLab (bundled ZK assets)
 `,
       },
     ],
@@ -363,7 +365,7 @@ An on-chain counter backed by Compact's built-in \`Counter\` ledger type.
         name: "voting.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.20;
+        content: `pragma language_version >= 0.22;
 
 import CompactStandardLibrary;
 
@@ -471,7 +473,7 @@ The choice itself never appears in the proof transcript.
         name: "bulletin-board.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.20;
+        content: `pragma language_version >= 0.22;
 
 import CompactStandardLibrary;
 
@@ -572,7 +574,7 @@ The secret never leaves the proof generation step.
         name: "owned.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.20;
+        content: `pragma language_version >= 0.22;
 
 import CompactStandardLibrary;
 
@@ -666,7 +668,7 @@ Demonstrates the standard admin ownership pattern in Compact.
         name: "token.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.20;
+        content: `pragma language_version >= 0.22;
 
 import CompactStandardLibrary;
 
@@ -774,7 +776,7 @@ An ERC-20 style token with public balances stored in a \`Map\`.
         name: "registry.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.20;
+        content: `pragma language_version >= 0.22;
 
 import CompactStandardLibrary;
 
@@ -858,7 +860,7 @@ In Compact itself, use: \`pad(32, "literal-string")\`.
         name: "profile.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.20;
+        content: `pragma language_version >= 0.22;
 
 import CompactStandardLibrary;
 
@@ -982,7 +984,7 @@ profiles.insert(disclose(caller), disclose(PlayerProfile {
         name: "escrow.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.20;
+        content: `pragma language_version >= 0.22;
 
 import CompactStandardLibrary;
 
@@ -1091,7 +1093,7 @@ parameters or witnesses need the explicit \`disclose()\` annotation.
         name: "commitment.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.20;
+        content: `pragma language_version >= 0.22;
 
 import CompactStandardLibrary;
 
@@ -1198,7 +1200,7 @@ The foundational ZK primitive: prove you know a secret without revealing it.
         name: "contract.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.20;
+        content: `pragma language_version >= 0.22;
 
 import CompactStandardLibrary;
 
@@ -1320,17 +1322,12 @@ export const PROJECT_PROVIDERS_TS: TemplateFile = {
   language: "typescript",
   folder: "src",
   content: `/**
- * providers.ts — Midnight SDK provider wiring
+ * providers.ts — Midnight SDK provider wiring (scaffold for local Node apps)
  *
- * Each provider has a single responsibility:
- *   proofProvider       → ZK proof generation (via Lace wallet)
- *   publicDataProvider  → reads public ledger state from the indexer
- *   walletProvider      → signs and submits transactions
- *   zkConfigProvider    → fetches proving/verifying keys
- *   privateStateProvider→ stores encrypted private state locally (IndexedDB)
+ * In CompactLab IDE, proofs go through the Docker proof-server via /api/proof/*.
+ * This file documents a typical standalone setup using Lace for signing only.
  */
 
-import { createDAppConnectorProofProvider }    from "@midnight-ntwrk/midnight-js-dapp-connector-proof-provider";
 import { indexerPublicDataProvider }            from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import { levelPrivateStateProvider }            from "@midnight-ntwrk/midnight-js-level-private-state-provider";
 import { fetchZkConfigProvider }                from "@midnight-ntwrk/midnight-js-fetch-zk-config-provider";
@@ -1338,23 +1335,18 @@ import { setNetworkId, NetworkId }              from "@midnight-ntwrk/midnight-j
 import type { MidnightProvider }                from "@midnight-ntwrk/midnight-js-types";
 import type { DAppConnectorWalletAPI }          from "@midnight-ntwrk/dapp-connector-api";
 
-// ─── Preprod network endpoints ────────────────────────────────────────────────
-
 export const NETWORK_CONFIG = {
   indexer:    "https://indexer.preprod.midnight.network/api/v3/graphql",
   indexerWS:  "wss://indexer.preprod.midnight.network/api/v3/graphql/ws",
   node:       "wss://rpc.preprod.midnight.network",
   networkId:  NetworkId.TestNet,
   faucet:     "https://faucet.preprod.midnight.network/",
+  proofServer: "http://localhost:6300",
 } as const;
 
-// ─── Provider factory ─────────────────────────────────────────────────────────
-
 /**
- * Build the full provider bundle needed to deploy and call circuits.
- *
- * @param walletAPI  Lace wallet API from: await window.midnight.mnLace.enable("preprod")
- * @param storeName  Unique key for IndexedDB private-state storage
+ * Build providers for a standalone app.
+ * Prefer CompactLab's HTTP proof proxy pattern for browser DApps.
  */
 export async function createProviders(
   walletAPI: DAppConnectorWalletAPI,
@@ -1363,21 +1355,18 @@ export async function createProviders(
   setNetworkId(NETWORK_CONFIG.networkId);
 
   return {
-    proofProvider: createDAppConnectorProofProvider(walletAPI),
+    // Wire your HTTP or wallet proof provider here — CompactLab uses /api/proof/*.
+    proofProvider: undefined as never,
 
     publicDataProvider: indexerPublicDataProvider(
       NETWORK_CONFIG.indexer,
       NETWORK_CONFIG.indexerWS,
     ),
 
-    // Encrypted private state is stored in the browser's IndexedDB.
-    // Use a unique storeName per contract instance.
     privateStateProvider: levelPrivateStateProvider({
       privateStateStoreName: storeName,
     }),
 
-    // Serving ZK keys from /public/contracts/ (Next.js static folder).
-    // For a standalone Node.js app, replace with a file:// URL or CDN.
     zkConfigProvider: fetchZkConfigProvider(
       typeof window !== "undefined" ? window.location.origin : "http://localhost:3000",
       fetch.bind(globalThis),
@@ -1420,6 +1409,7 @@ export const PROJECT_DEPLOYMENT_JSON: TemplateFile = {
 
 // ─── Pre-loaded sample projects (beginner-friendly only) ──────────────────────
 
+/** Default projects shown on first launch — only deployable templates. */
 export const SAMPLE_PROJECTS: Array<{
   id: string;
   name: string;
@@ -1430,23 +1420,16 @@ export const SAMPLE_PROJECTS: Array<{
   {
     id: "proj_1",
     name: "Hello, Midnight!",
-    description: "Store a public string on-chain. The simplest possible Compact contract.",
+    description: "Store a public string on-chain. Deployable to Midnight Preprod from the IDE.",
     template: "hello-world",
     updatedAt: Date.now() - 1000 * 60 * 30,
   },
   {
     id: "proj_2",
     name: "Counter",
-    description: "On-chain counter using the built-in Counter type and increment().",
+    description: "On-chain Counter with increment() — deployable from the IDE.",
     template: "counter",
-    updatedAt: Date.now() - 1000 * 60 * 60 * 2,
-  },
-  {
-    id: "proj_3",
-    name: "Anonymous Voting",
-    description: "ZK voting: who voted is public, what they voted stays private.",
-    template: "voting",
-    updatedAt: Date.now() - 1000 * 60 * 60 * 24,
+    updatedAt: Date.now() - 1000 * 60 * 60,
   },
 ];
 

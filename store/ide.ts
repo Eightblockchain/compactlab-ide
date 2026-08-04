@@ -7,7 +7,7 @@ import type { CompactVersion } from "@/lib/version";
 import type { CompileResult, SimulateResult, DeployResult, LogEntry } from "@/lib/compact";
 
 export type IDEStatus = "idle" | "compiling" | "simulating" | "deploying" | "saving";
-export type PanelTab = "simulation" | "privacy" | "contract-ui";
+export type PanelTab = "contract-ui" | "source-scan";
 export type LogTab = "logs" | "compile" | "network";
 
 // ─── Domain types ──────────────────────────────────────────────────────────────
@@ -22,7 +22,7 @@ export interface ProjectFolder {
 export interface ProjectFile {
   id: string;
   name: string;
-  language: "compact" | "markdown" | "json" | "javascript" | "typescript" | "yaml";
+  language: "compact" | "markdown" | "json" | "javascript" | "typescript" | "yaml" | "text";
   content: string;
   folderId?: string | null;
   createdAt: number;
@@ -43,6 +43,10 @@ export interface Project {
   // Per-project results — survive project switching and page refresh
   compileResult?: CompileResult | null;
   deployResult?: DeployResult | null;
+  /** User-supplied private witness values (name → string form). Persisted per project. */
+  witnessValues?: Record<string, string>;
+  /** Base URL for full-ZK compile artifacts (e.g. /contracts/managed/<id>) */
+  artifactBaseUrl?: string | null;
 }
 
 export interface WalletState {
@@ -80,6 +84,8 @@ export interface IDEStore {
   simulateInputs: Record<string, string>;
   activeCircuit: string | null;
   deployResult: DeployResult | null;
+  /** Active project's witness input map (synced onto Project). */
+  witnessValues: Record<string, string>;
 
   // Logs & panels
   logs: LogEntry[];
@@ -88,7 +94,7 @@ export interface IDEStore {
   bottomPanelOpen: boolean;
   sidebarOpen: boolean;
 
-  // Compact language version (persisted, drives status-bar label + pragma snippet)
+  // Compact language version label (pinned; not user-switchable until v2)
   compactVersion: CompactVersion;
 
   // Modal
@@ -107,7 +113,7 @@ export interface IDEStore {
   openTab: (fileId: string) => void;
   closeTab: (fileId: string) => void;
   addFile: (name: string, language?: ProjectFile["language"], folderId?: string | null) => ProjectFile | null;
-  upsertGeneratedFiles: (files: Array<{ name: string; language: ProjectFile["language"]; content: string }>) => void;
+  upsertGeneratedFiles: (files: Array<{ path?: string; name: string; language: ProjectFile["language"]; content: string }>) => void;
   deleteFile: (fileId: string) => void;
   addFolder: (name: string, parentId?: string | null) => ProjectFolder | null;
   deleteFolder: (folderId: string) => void;
@@ -122,6 +128,8 @@ export interface IDEStore {
   setCompileResult: (result: CompileResult | null) => void;
   setSimulateResult: (result: SimulateResult | null) => void;
   setDeployResult: (result: DeployResult | null) => void;
+  setWitnessValue: (name: string, value: string) => void;
+  setWitnessValues: (values: Record<string, string>) => void;
   setSimulateInputs: (inputs: Record<string, string>) => void;
   setActiveCircuit: (circuit: string | null) => void;
 
@@ -129,9 +137,7 @@ export interface IDEStore {
   addLog: (log: LogEntry) => void;
   clearLogs: () => void;
 
-  // Actions — wallet
-  connectWallet: () => void;
-  disconnectWallet: () => void;
+  // Actions — wallet (real connect lives in useMidnightWallet; this syncs UI state)
   setWalletState: (wallet: WalletState) => void;
 
   // Actions — UI
@@ -140,7 +146,7 @@ export interface IDEStore {
   setBottomPanelOpen: (open: boolean) => void;
   setSidebarOpen: (open: boolean) => void;
   setNewProjectModalOpen: (open: boolean, template?: string) => void;
-  setCompactVersion: (version: CompactVersion) => void;
+  setCompactVersion: (_version?: CompactVersion) => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -213,7 +219,8 @@ function buildProject(
     template,
     folders: [...folderMap.values()],
     files,
-    activeFileId: files[0]?.id ?? "",
+    // Default to the first .compact source file so compile works out of the box
+    activeFileId: (files.find((f) => f.language === "compact") ?? files[0])?.id ?? "",
     createdAt,
     updatedAt,
   };
@@ -268,9 +275,10 @@ export const useIDEStore = create<IDEStore>()(
       simulateInputs: {},
       activeCircuit: null,
       deployResult: null,
+      witnessValues: firstProject?.witnessValues ?? {},
 
       logs: [],
-      rightPanelTab: "simulation",
+      rightPanelTab: "contract-ui",
       logTab: "logs",
       bottomPanelOpen: true,
       sidebarOpen: true,
@@ -310,6 +318,7 @@ export const useIDEStore = create<IDEStore>()(
           compileResult: null,
           simulateResult: null,
           deployResult: null,
+          witnessValues: {},
           isNewProjectModalOpen: false,
           openTabIds: file ? [file.id] : [],
           tabBuffers: {},
@@ -336,6 +345,7 @@ export const useIDEStore = create<IDEStore>()(
           compileResult: project.compileResult ?? null,
           simulateResult: null,
           deployResult: project.deployResult ?? null,
+          witnessValues: project.witnessValues ?? {},
           logs: [],
           openTabIds: file ? [file.id] : [],
           tabBuffers: {},
@@ -549,30 +559,57 @@ export const useIDEStore = create<IDEStore>()(
         if (!activeProjectId || !activeProject) return;
         const now = Date.now();
 
-        // Find or create the "contracts" folder at root level
-        // Compile output (contract-info.json, index.js, index.d.ts) lives here
-        // alongside the source .compact file.
         let folders = [...(activeProject.folders ?? [])];
-        let genFolder = folders.find((f) => f.name === "contracts" && f.parentId === null);
-        if (!genFolder) {
-          genFolder = { id: generateId(), name: "contracts", parentId: null, createdAt: now };
-          folders = [...folders, genFolder];
-        }
-        const folderId = genFolder.id;
-
-        // Upsert each file by name within the contracts folder
         let updatedFiles = [...activeProject.files];
+
+        // Ensure the root-level "contracts" folder exists
+        let contractsFolder = folders.find((f) => f.name === "contracts" && f.parentId === null);
+        if (!contractsFolder) {
+          contractsFolder = { id: generateId(), name: "contracts", parentId: null, createdAt: now };
+          folders = [...folders, contractsFolder];
+        }
+
+        // Helper: find or create a subfolder by name under a given parent
+        const ensureFolder = (name: string, parentId: string): ProjectFolder => {
+          let f = folders.find((x) => x.name === name && x.parentId === parentId);
+          if (!f) {
+            f = { id: generateId(), name, parentId, createdAt: now };
+            folders = [...folders, f];
+          }
+          return f;
+        };
+
         for (const newFile of files) {
-          const idx = updatedFiles.findIndex((f) => f.name === newFile.name && f.folderId === folderId);
+          // Remap compiler output into contracts/managed/[project-slug]/<path>
+          // Compact emits: compiler/, contract/, zkir/, keys/ directly in outputDir.
+          // We want them under contracts/managed/[slug]/ so the tree looks like:
+          //   contracts/managed/hello-world/compiler/contract-info.json
+          //   contracts/managed/hello-world/contract/index.js
+          //   contracts/managed/hello-world/zkir/storeMessage.zkir
+          const slug = activeProject.slug;
+          const rawPath = newFile.path ?? newFile.name;
+          const prefixed = `managed/${slug}/${rawPath}`;
+
+          const segments = prefixed.split("/").filter(Boolean);
+          const fileName = segments[segments.length - 1];
+          const subfolders = segments.slice(0, -1);
+
+          // Walk/create the folder chain starting from contracts/
+          let parentId = contractsFolder!.id;
+          for (const seg of subfolders) {
+            parentId = ensureFolder(seg, parentId).id;
+          }
+
+          const idx = updatedFiles.findIndex((f) => f.name === fileName && f.folderId === parentId);
           if (idx >= 0) {
             updatedFiles[idx] = { ...updatedFiles[idx], content: newFile.content, updatedAt: now };
           } else {
             updatedFiles.push({
               id: generateId(),
-              name: newFile.name,
+              name: fileName,
               language: newFile.language,
               content: newFile.content,
-              folderId,
+              folderId: parentId,
               createdAt: now,
               updatedAt: now,
             });
@@ -704,7 +741,12 @@ export const useIDEStore = create<IDEStore>()(
       setCompileResult: (compileResult) => {
         const { activeProjectId, activeProject, projects } = get();
         if (activeProjectId && activeProject) {
-          const updated = { ...activeProject, compileResult };
+          const updated = {
+            ...activeProject,
+            compileResult,
+            artifactBaseUrl:
+              compileResult?.artifactBaseUrl ?? activeProject.artifactBaseUrl ?? null,
+          };
           set({
             compileResult,
             activeProject: updated,
@@ -728,6 +770,33 @@ export const useIDEStore = create<IDEStore>()(
           set({ deployResult });
         }
       },
+      setWitnessValue: (name, value) => {
+        const { activeProjectId, activeProject, projects, witnessValues } = get();
+        const next = { ...witnessValues, [name]: value };
+        if (activeProjectId && activeProject) {
+          const updated = { ...activeProject, witnessValues: next };
+          set({
+            witnessValues: next,
+            activeProject: updated,
+            projects: projects.map((p) => (p.id === activeProjectId ? updated : p)),
+          });
+        } else {
+          set({ witnessValues: next });
+        }
+      },
+      setWitnessValues: (next) => {
+        const { activeProjectId, activeProject, projects } = get();
+        if (activeProjectId && activeProject) {
+          const updated = { ...activeProject, witnessValues: next };
+          set({
+            witnessValues: next,
+            activeProject: updated,
+            projects: projects.map((p) => (p.id === activeProjectId ? updated : p)),
+          });
+        } else {
+          set({ witnessValues: next });
+        }
+      },
       setSimulateInputs: (simulateInputs) => set({ simulateInputs }),
       setActiveCircuit: (activeCircuit) => set({ activeCircuit }),
 
@@ -735,16 +804,6 @@ export const useIDEStore = create<IDEStore>()(
         set((s) => ({ logs: [...s.logs.slice(-500), log] })),
       clearLogs: () => set({ logs: [] }),
 
-      connectWallet: () => {/* Use useLaceWallet hook — this is a no-op placeholder */},
-      disconnectWallet: () =>
-        set({
-          wallet: {
-            connected: false,
-            address: null,
-            balance: null,
-            network: "Midnight Preprod",
-          },
-        }),
       setWalletState: (wallet) => set({ wallet }),
 
       setRightPanelTab: (rightPanelTab) => set({ rightPanelTab }),
@@ -753,29 +812,29 @@ export const useIDEStore = create<IDEStore>()(
       setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
       setNewProjectModalOpen: (open, template = "blank") =>
         set({ isNewProjectModalOpen: open, newProjectModalTemplate: template }),
-      setCompactVersion: (compactVersion) => set({ compactVersion }),
+      // Compact version is pinned server-side; keep field for persisted state shape only.
+      setCompactVersion: () => set({ compactVersion: COMPACT_STABLE_VERSION }),
     }),
     {
-      name: "compactlab-v4",
-      version: 4,
+      name: "compactlab-v5",
+      version: 5,
       migrate: (persistedState, fromVersion) => {
-        // v4: rebuild ALL template projects so contracts/ folder and corrected api.ts are applied
-        // (v2 only rebuilt hello-world; v3 rebuilds all template projects)
-        if (fromVersion < 4) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const state = persistedState as any;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const state = persistedState as any;
+        if (state?.rightPanelTab === "simulation" || state?.rightPanelTab === "privacy") {
+          state.rightPanelTab = "contract-ui";
+        }
+        if (fromVersion < 5) {
           if (state?.projects) {
             const now = Date.now();
             state.projects = state.projects.map((proj: Project) => {
               if (proj.template) {
-                // Rebuild entirely from the latest template, preserving id/name/description/dates
                 return buildProject(proj.id, proj.name, proj.template, proj.description, proj.createdAt ?? now, now);
               }
               return proj;
             });
           }
         }
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return persistedState as any;
       },
       partialize: (state) => ({
@@ -785,10 +844,10 @@ export const useIDEStore = create<IDEStore>()(
         sidebarOpen: state.sidebarOpen,
         bottomPanelOpen: state.bottomPanelOpen,
         rightPanelTab: state.rightPanelTab,
-        compactVersion: state.compactVersion,
       }),
       onRehydrateStorage: () => (state) => {
         if (!state) return;
+        state.compactVersion = COMPACT_STABLE_VERSION;
         const proj = state.projects?.find(
           (p) => p.id === state.activeProjectId
         );

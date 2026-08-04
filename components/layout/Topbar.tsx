@@ -4,13 +4,23 @@ import { useIDEStore } from "@/store/ide";
 import { Button, StatusDot, Divider } from "@/components/ui";
 import { cn, formatAddress, generateId } from "@/lib/utils";
 import { useState, useRef, useEffect } from "react";
-import { useLaceWallet } from "@/hooks/useLaceWallet";
+import { useLaceWallet, MIDNIGHT_WALLET_LINKS, listMidnightWallets } from "@/hooks/useLaceWallet";
 import type { CompileResult, DeployResult } from "@/lib/compact";
-import { deployPlaygroundContract } from "@/lib/playground-deploy";
+import { compileCompact, makeLog, extractWitnesses } from "@/lib/compact";
+import {
+  canDeployProject,
+  deployPlaygroundContract,
+  checkProofServerHealthy,
+} from "@/lib/playground-deploy";
+
+function countMidnightWallets(): number {
+  return listMidnightWallets().length;
+}
 
 export function Topbar() {
   const {
     activeProject,
+    activeFile,
     saveStatus,
     status,
     code,
@@ -25,11 +35,13 @@ export function Topbar() {
     renameProject,
     setRightPanelTab,
     upsertGeneratedFiles,
+    setCode,
+    witnessValues,
   } = useIDEStore();
 
   const lace = useLaceWallet();
+  const [proofHealthy, setProofHealthy] = useState<boolean | null>(null);
 
-  // Sync Lace wallet state into the IDE store
   useEffect(() => {
     if (lace.status === "connected" && lace.walletInfo) {
       setWalletState({
@@ -48,13 +60,34 @@ export function Topbar() {
     }
   }, [lace.status, lace.walletInfo, setWalletState]);
 
+  useEffect(() => {
+    if (lace.status === "error" && lace.error) {
+      addLog(makeLog("error", `Wallet: ${lace.error}`, "network"));
+      setLogTab("network");
+      setBottomPanelOpen(true);
+    }
+  }, [lace.status, lace.error, addLog, setLogTab, setBottomPanelOpen]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      const ok = await checkProofServerHealthy();
+      if (!cancelled) setProofHealthy(ok);
+    };
+    void tick();
+    const id = setInterval(tick, 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const [showWalletPicker, setShowWalletPicker] = useState(false);
   const walletPickerRef = useRef<HTMLDivElement>(null);
 
-  // Close wallet picker on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (walletPickerRef.current && !walletPickerRef.current.contains(e.target as Node)) {
@@ -65,7 +98,21 @@ export function Topbar() {
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const handleRun = async () => {
+  const resolveCompactCode = (): { code: string; ok: boolean } => {
+    let compileCode = code;
+    if (activeFile?.language !== "compact") {
+      const compactFile = activeProject?.files.find((f) => f.language === "compact");
+      if (!compactFile) {
+        addLog(makeLog("error", "No Compact contract file (.compact) found in this project.", "compiler"));
+        return { code: "", ok: false };
+      }
+      addLog(makeLog("warn", `Compiling ${compactFile.name} (not the currently open file)`, "compiler"));
+      compileCode = compactFile.content;
+    }
+    return { code: compileCode, ok: true };
+  };
+
+  const handleCompile = async (zk: boolean) => {
     if (status !== "idle") return;
     clearLogs();
     setLogTab("compile");
@@ -73,101 +120,197 @@ export function Topbar() {
     setCompileResult(null);
     setStatus("compiling");
 
-    addLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Starting compilation...", source: "compiler" });
-
-    try {
-      const res = await fetch("/api/compile", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
-      });
-      const result = await res.json() as CompileResult & { mock?: boolean; compilerVersion?: string; generatedFiles?: Array<{ name: string; language: "json" | "javascript" | "typescript"; content: string }> };
-
-      if (result.success) {
-        const circuitCount = result.circuitMetadata?.length ?? 0;
-        const versionTag = result.compilerVersion ? ` (compact ${result.compilerVersion})` : result.mock ? " (mock)" : "";
-        addLog({ id: generateId(), timestamp: Date.now(), level: "success", message: `Compilation successful${versionTag} — ${circuitCount} circuit(s) in ${result.duration}ms`, source: "compiler" });
-        result.warnings?.forEach((w) => {
-          addLog({ id: generateId(), timestamp: Date.now(), level: "warn", message: w, source: "compiler" });
-        });
-        result.circuitMetadata?.forEach((c) => {
-          const params = c.inputs.map((i) => `${i.name}: ${i.type}`).join(", ");
-          addLog({ id: generateId(), timestamp: Date.now(), level: "info", message: `  circuit ${c.name}(${params}) → ${c.output}`, source: "compiler" });
-        });
-        // Add/update generated files in the project tree
-        if (result.generatedFiles && result.generatedFiles.length > 0) {
-          upsertGeneratedFiles(result.generatedFiles);
-          addLog({ id: generateId(), timestamp: Date.now(), level: "info", message: `  Generated ${result.generatedFiles.length} file(s) in generated/`, source: "compiler" });
-        }
-      } else {
-        addLog({ id: generateId(), timestamp: Date.now(), level: "error", message: "Compilation failed", source: "compiler" });
-        result.errors?.forEach((e) => {
-          addLog({ id: generateId(), timestamp: Date.now(), level: "error", message: `  Line ${e.line}, Col ${e.column}: ${e.message}`, source: "compiler" });
-        });
-      }
-
-      setCompileResult(result);
-    } catch {
-      addLog({ id: generateId(), timestamp: Date.now(), level: "error", message: "Compilation failed: could not reach compile service", source: "compiler" });
+    const resolved = resolveCompactCode();
+    if (!resolved.ok) {
+      setStatus("idle");
+      return;
     }
 
+    addLog(
+      makeLog(
+        "info",
+        zk
+          ? "Starting full Compact compile (produces contract/, keys/, zkir/, compiler/)…"
+          : "Starting Compact typecheck with --skip-zk (no proving keys)…",
+        "compiler",
+      ),
+    );
+
+    const result = await compileCompact(resolved.code, {
+      projectId: activeProject?.id,
+      zk,
+    });
+
+    if (result.pragmaNormalized && result.normalizedCode) {
+      setCode(result.normalizedCode);
+      addLog(
+        makeLog(
+          "info",
+          "Updated pragma to language version >= 0.22 (compiler package +0.30.0 implements language 0.22.0).",
+          "compiler",
+        ),
+      );
+    }
+
+    if (result.success) {
+      const circuitCount = result.circuitMetadata?.length ?? 0;
+      const versionTag = result.compilerVersion ? ` (compact ${result.compilerVersion})` : "";
+      const mode = result.skipZk
+        ? "typecheck (--skip-zk, no proving keys)"
+        : "full ZK compile";
+      addLog(
+        makeLog(
+          "success",
+          `${mode} OK${versionTag}: ${circuitCount} circuit(s) in ${result.duration}ms`,
+          "compiler",
+        ),
+      );
+      if (result.stdoutHint) addLog(makeLog("info", result.stdoutHint, "compiler"));
+      if (result.artifacts) {
+        const { contract, keys, zkir, compiler } = result.artifacts;
+        addLog(
+          makeLog(
+            "info",
+            `Artifacts: contract/[${contract.join(", ") || "-"}]  keys/[${keys.join(", ") || "NONE"}]  zkir/[${zkir.join(", ") || "-"}]  compiler/[${compiler.join(", ") || "-"}]`,
+            "compiler",
+          ),
+        );
+        if (result.skipZk) {
+          addLog(
+            makeLog(
+              "warn",
+              "Per Midnight docs, --skip-zk skips proving keys. Use Compile (not Typecheck) for deployable keys/.",
+              "compiler",
+            ),
+          );
+        }
+      }
+      result.warnings?.forEach((w) => addLog(makeLog("warn", w, "compiler")));
+      result.circuitMetadata?.forEach((c) => {
+        const params = c.inputs.map((i) => `${i.name}: ${i.type}`).join(", ");
+        addLog(makeLog("info", `circuit ${c.name}(${params}) → ${c.output}`, "compiler"));
+      });
+      if (result.artifactBaseUrl) {
+        addLog(makeLog("success", `Persisted ZK artifacts at ${result.artifactBaseUrl}`, "compiler"));
+        addLog(
+          makeLog(
+            "info",
+            `On disk: public${result.artifactBaseUrl}/keys/ (proving keys are binary; stubs appear under contracts/managed/ in the sidebar).`,
+            "compiler",
+          ),
+        );
+      }
+      if (result.generatedFiles && result.generatedFiles.length > 0) {
+        upsertGeneratedFiles(result.generatedFiles);
+        addLog(
+          makeLog(
+            "info",
+            `Mirrored ${result.generatedFiles.length} artifact(s) into contracts/managed/ (keys are binary stubs)`,
+            "compiler",
+          ),
+        );
+      }
+    } else {
+      const errorCount = result.errors?.length ?? 0;
+      addLog(
+        makeLog(
+          "error",
+          `Compilation failed: ${errorCount} error${errorCount !== 1 ? "s" : ""}`,
+          "compiler",
+        ),
+      );
+      result.errors?.forEach((e) => {
+        addLog(makeLog("error", `Line ${e.line}, Col ${e.column}: ${e.message}`, "compiler"));
+      });
+      if (result.installHint) addLog(makeLog("info", result.installHint, "compiler"));
+    }
+
+    setCompileResult(result);
     setStatus("idle");
   };
 
   const handleDeploy = async () => {
     if (status !== "idle") return;
 
+    const template = activeProject?.template ?? "";
+    const artifactBaseUrl = activeProject?.artifactBaseUrl;
+    if (!canDeployProject(template, artifactBaseUrl)) {
+      setLogTab("network");
+      setBottomPanelOpen(true);
+      addLog(
+        makeLog(
+          "error",
+          `Template "${template}" is not deployable. Use hello-world / counter, or run Compile first.`,
+          "network",
+        ),
+      );
+      return;
+    }
+
     clearLogs();
     setBottomPanelOpen(true);
 
-    // ── Step 1: Get or connect the wallet ────────────────────────────────────
-    // connect() re-checks window.midnight.mnLace at call time so it works even
-    // if the extension injected after our mount-time detection ran.
     let connectedAPI = lace.connectedAPI;
     if (!connectedAPI) {
       setLogTab("network");
-      addLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Connecting to Lace wallet…", source: "network" });
+      addLog(makeLog("info", "Connecting to Midnight wallet…", "network"));
       connectedAPI = await lace.connect();
       if (!connectedAPI) {
-        // connect() already set lace.error; the topbar will show "Retry"
-        addLog({ id: generateId(), timestamp: Date.now(), level: "error", message: lace.error ?? "Could not connect to Lace wallet. Make sure the extension is installed and enabled.", source: "network" });
+        addLog(
+          makeLog(
+            "error",
+            lace.error ??
+              "Could not connect. Install 1AM or Lace (Midnight), unlock it, approve this site, then retry.",
+            "network",
+          ),
+        );
         return;
       }
-      addLog({ id: generateId(), timestamp: Date.now(), level: "success", message: "Wallet connected.", source: "network" });
+      addLog(makeLog("success", "Wallet connected.", "network"));
     }
 
-    // ── Step 2: Compile ────────────────────────────────────────────────────────
+    addLog(makeLog("info", "Need tDUST for fees: https://faucet.preprod.midnight.network/", "network"));
+
+    // Optional syntax check before deploy (skip-zk) — does not produce deploy assets
     setLogTab("compile");
     setStatus("compiling");
-    addLog({ id: generateId(), timestamp: Date.now(), level: "info", message: "Starting compilation...", source: "compiler" });
+    const compactFile = activeProject?.files.find((f) => f.language === "compact");
+    if (!compactFile) {
+      addLog(makeLog("error", "No Compact contract file (.compact) found in this project.", "compiler"));
+      setStatus("idle");
+      return;
+    }
 
-    let compileResult: (CompileResult & { mock?: boolean }) | null = null;
+    let compileResult: CompileResult;
     try {
-      const res = await fetch("/api/compile", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
+      compileResult = await compileCompact(compactFile.content, {
+        projectId: activeProject?.id,
+        zk: false,
       });
-      compileResult = await res.json() as CompileResult & { mock?: boolean };
       setCompileResult(compileResult);
     } catch {
-      addLog({ id: generateId(), timestamp: Date.now(), level: "error", message: "Compilation failed: could not reach compile service", source: "compiler" });
+      addLog(makeLog("error", "Compilation failed: could not reach compile service", "compiler"));
       setStatus("idle");
       return;
     }
 
-    if (!compileResult?.success) {
-      compileResult?.errors?.forEach((e) => {
-        addLog({ id: generateId(), timestamp: Date.now(), level: "error", message: `  Line ${e.line}: ${e.message}`, source: "compiler" });
+    if (!compileResult.success) {
+      const errCount = compileResult.errors?.length ?? 0;
+      addLog(makeLog("error", `Compilation failed: ${errCount} error(s). Fix before deploying.`, "compiler"));
+      compileResult.errors?.forEach((e) => {
+        addLog(makeLog("error", `Line ${e.line}, Col ${e.column}: ${e.message}`, "compiler"));
       });
-      addLog({ id: generateId(), timestamp: Date.now(), level: "error", message: "Fix compilation errors before deploying", source: "compiler" });
       setStatus("idle");
       return;
     }
 
-    addLog({ id: generateId(), timestamp: Date.now(), level: "success", message: "Compilation successful", source: "compiler" });
+    addLog(makeLog("success", "Syntax/typecheck OK", "compiler"));
 
-    // ── Step 3: Deploy ─────────────────────────────────────────────────────────
+    // Witness *values* are not required at deploy (constructor typically does not
+    // call them). Official bboard seeds a random private state bag for the SDK.
+    // User-supplied values are required later at Call.
+    const witnessSpecs = extractWitnesses(compactFile.content);
+
     setLogTab("network");
     setStatus("deploying");
 
@@ -175,20 +318,33 @@ export function Topbar() {
     try {
       deployResult = await deployPlaygroundContract(
         connectedAPI,
-        activeProject?.template ?? "",
+        template,
         addLog,
+        {
+          artifactBaseUrl,
+          projectId: activeProject?.id,
+          witnessSpecs,
+          // Optional at deploy — used only if the user already filled Contract UI
+          witnessValues,
+        },
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      addLog({ id: generateId(), timestamp: Date.now(), level: "error", message: `Deploy failed: ${message}`, source: "network" });
+      addLog(makeLog("error", `Deploy failed: ${message}`, "network"));
       deployResult = { success: false, duration: 0, error: message };
     }
 
     setDeployResult(deployResult);
     setStatus("idle");
-
     if (deployResult.success) {
       setRightPanelTab("contract-ui");
+      addLog(
+        makeLog(
+          "success",
+          "Next: open Contract UI on the right, then Call a circuit (e.g. storeMessage / increment). Proofs take 1-2 min.",
+          "network",
+        ),
+      );
     }
   };
 
@@ -207,10 +363,12 @@ export function Topbar() {
   };
 
   const isRunning = status !== "idle";
+  const deployEnabled =
+    !isRunning &&
+    canDeployProject(activeProject?.template ?? "", activeProject?.artifactBaseUrl);
 
   return (
     <header className="h-14 flex items-center gap-2 px-4 bg-surface border-b border-border flex-shrink-0">
-      {/* Logo */}
       <div className="flex items-center gap-2 mr-3">
         <div className="w-7 h-7 rounded-md bg-accent flex items-center justify-center flex-shrink-0">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -222,7 +380,6 @@ export function Topbar() {
         <span className="text-border-strong text-2xl leading-none select-none">/</span>
       </div>
 
-      {/* Project name */}
       <div className="flex items-center gap-2 min-w-0">
         {editingName ? (
           <input
@@ -247,62 +404,84 @@ export function Topbar() {
           </button>
         )}
 
-        {/* Save status */}
         <div className="flex items-center gap-1">
-          {saveStatus === "saved" && (
-            <span className="text-xs text-text-muted">Saved</span>
-          )}
+          {saveStatus === "saved" && <span className="text-xs text-text-muted">Saved</span>}
           {saveStatus === "saving" && (
             <span className="text-xs text-text-muted flex items-center gap-1">
               <span className="w-1 h-1 bg-warning rounded-full status-pulse" />
               Saving…
             </span>
           )}
-          {saveStatus === "unsaved" && (
-            <span className="text-xs text-warning">Unsaved</span>
-          )}
+          {saveStatus === "unsaved" && <span className="text-xs text-warning">Unsaved</span>}
         </div>
       </div>
 
-      {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Step indicator */}
+      {/* Live status */}
+      <div className="hidden md:flex items-center gap-3 text-xs mr-2">
+        <span className="flex items-center gap-1.5 text-text-muted" title="Docker proof server :6300">
+          <span
+            className={cn(
+              "w-1.5 h-1.5 rounded-full",
+              proofHealthy === true ? "bg-success" : proofHealthy === false ? "bg-error" : "bg-text-dim",
+            )}
+          />
+          Proof {proofHealthy === true ? "up" : proofHealthy === false ? "down" : "…"}
+        </span>
+        <span className="flex items-center gap-1.5 text-text-muted">
+          <span
+            className={cn(
+              "w-1.5 h-1.5 rounded-full",
+              lace.status === "connected"
+                ? "bg-success"
+                : lace.status === "error"
+                  ? "bg-error"
+                  : "bg-text-dim",
+            )}
+          />
+          Wallet{" "}
+          {lace.status === "connected"
+            ? lace.connectedWalletName
+              ? lace.connectedWalletName.slice(0, 12)
+              : "on"
+            : lace.status === "error"
+              ? "error"
+              : lace.status === "connecting"
+                ? "…"
+                : "off"}
+        </span>
+      </div>
+
       {isRunning && (
         <div className="hidden sm:flex items-center gap-1.5 text-xs mr-2">
-          <StepBadge step={1} label="Edit" done />
+          <StepBadge step={1} label="Compile" active={status === "compiling"} done={status === "deploying"} />
           <div className="w-4 h-px bg-border" />
-          <StepBadge step={2} label="Compile" active={status === "compiling"} done={status === "deploying"} />
+          <StepBadge step={2} label="Prove" active={status === "deploying"} />
           <div className="w-4 h-px bg-border" />
-          <StepBadge step={3} label="Simulate" />
-          <div className="w-4 h-px bg-border" />
-          <StepBadge step={4} label="Deploy" active={status === "deploying"} />
+          <StepBadge step={3} label="Submit" active={status === "deploying"} />
         </div>
       )}
 
-      {/* Status */}
       {isRunning && (
         <StatusDot
           status="running"
           label={
-            status === "compiling" ? "Compiling…" :
-            status === "simulating" ? "Simulating…" :
-            status === "deploying" ? "Deploying…" :
-            "Running…"
+            status === "compiling" ? "Compiling…" : status === "deploying" ? "Deploying…" : "Running…"
           }
           className="mr-1"
         />
       )}
 
-      {/* Actions */}
       <div className="flex items-center gap-2">
         <Button
           variant="default"
           size="md"
-          onClick={handleRun}
+          onClick={() => void handleCompile(true)}
           loading={status === "compiling"}
           disabled={isRunning}
           className="gap-1.5"
+          title="Full Compact compile (produces proving keys for your edits)"
         >
           <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
             <path d="M2 2.5L10 6L2 9.5V2.5z" />
@@ -311,12 +490,29 @@ export function Topbar() {
         </Button>
 
         <Button
-          variant="accent"
+          variant="default"
           size="md"
-          onClick={handleDeploy}
-          loading={status === "deploying"}
+          onClick={() => void handleCompile(false)}
+          loading={status === "compiling"}
           disabled={isRunning}
           className="gap-1.5"
+          title="Fast syntax/type check only (no proving keys)"
+        >
+          Check syntax
+        </Button>
+
+        <Button
+          variant="accent"
+          size="md"
+          onClick={() => void handleDeploy()}
+          loading={status === "deploying"}
+          disabled={!deployEnabled}
+          className="gap-1.5"
+          title={
+            deployEnabled
+              ? "Deploy to Midnight Preprod"
+              : "Only hello-world / counter (bundled) or projects after Compile with ZK artifacts"
+          }
         >
           <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M6 1v7M3 5l3-4 3 4M1 10h10" strokeLinecap="round" strokeLinejoin="round" />
@@ -326,88 +522,101 @@ export function Topbar() {
 
         <Divider vertical className="mx-1 h-5" />
 
-        {/* Wallet */}
         {lace.status === "connected" && lace.walletInfo ? (
           <button
             onClick={lace.disconnect}
             className={cn(
               "flex items-center gap-1.5 rounded px-2.5 py-1.5 h-7",
               "border border-success/20 bg-success/8 text-success text-sm font-medium",
-              "hover:bg-success/12 transition-colors"
+              "hover:bg-success/12 transition-colors",
             )}
-            title={`Connected to ${lace.connectedWalletName ?? "wallet"} — click to disconnect`}
+            title={`Connected to ${lace.connectedWalletName ?? "wallet"} (click to disconnect)`}
           >
             <span className="w-1.5 h-1.5 rounded-full bg-success" />
             {formatAddress(lace.walletInfo.unshieldedAddress)}
           </button>
-        ) : lace.status === "error" ? (
-          <button
-            onClick={() => lace.availableWallets.length > 1 ? setShowWalletPicker(true) : lace.connect()}
-            className={cn(
-              "flex items-center gap-1.5 rounded px-2.5 py-1.5 h-7",
-              "border border-error/30 bg-error/8 text-error text-sm font-medium",
-              "hover:bg-error/12 transition-colors"
-            )}
-            title={lace.error ?? "Wallet error — click to retry"}
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-error" />
-            Retry
-          </button>
         ) : (
           <div className="relative" ref={walletPickerRef}>
             <Button
-              variant="default"
+              variant={lace.status === "error" ? "accent" : "default"}
               size="md"
               onClick={() => {
-                if (!lace.isInstalled) {
-                  window.open("https://lace.io", "_blank");
-                } else if (lace.availableWallets.length > 1) {
-                  setShowWalletPicker((v) => !v);
-                } else {
-                  void lace.connect();
+                lace.refreshWallets();
+                const count = countMidnightWallets();
+                if (count === 0) {
+                  setShowWalletPicker(true);
+                  return;
                 }
+                if (count > 1) {
+                  setShowWalletPicker((v) => !v);
+                  return;
+                }
+                void lace.connect();
               }}
               loading={lace.status === "connecting"}
               disabled={lace.status === "connecting"}
               className="gap-1.5"
+              title={
+                lace.status === "error"
+                  ? lace.error
+                    ? `${lace.error} (click to retry)`
+                    : "Connection failed (click to retry)"
+                  : lace.isInstalled
+                    ? "Connect a Midnight wallet (Preprod)"
+                    : "No window.midnight wallet detected. Install 1AM or Lace (Midnight) and reload"
+              }
             >
-              <svg className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4">
-                <rect x="1" y="4" width="12" height="8" rx="1.5" />
-                <path d="M1 7h12M10 8.5h.5" strokeLinecap="round" />
-              </svg>
-              {!lace.isInstalled
-                ? "Install Lace"
-                : lace.status === "connecting"
+              {lace.status === "connecting"
                 ? "Connecting…"
-                : lace.availableWallets.length > 1
-                ? "Connect Wallet ▾"
-                : "Connect Wallet"}
+                : lace.status === "error"
+                  ? "Retry Wallet"
+                  : !lace.isInstalled
+                    ? "Install Wallet ▾"
+                    : lace.availableWallets.length > 1
+                      ? "Connect Wallet ▾"
+                      : "Connect Wallet"}
             </Button>
 
-            {/* Wallet picker dropdown */}
-            {showWalletPicker && lace.availableWallets.length > 0 && (
-              <div className="absolute right-0 top-full mt-1 z-50 min-w-[180px] bg-surface-2 border border-border rounded-md shadow-lg overflow-hidden">
+            {showWalletPicker && (
+              <div className="absolute right-0 top-full mt-1 z-50 min-w-[220px] bg-surface-2 border border-border rounded-md shadow-lg overflow-hidden">
                 <div className="px-3 py-1.5 border-b border-border">
-                  <span className="text-2xs text-text-muted uppercase tracking-wide">Choose wallet</span>
+                  <span className="text-2xs text-text-muted uppercase tracking-wide">
+                    {lace.availableWallets.length > 0 ? "Choose wallet" : "Install a Midnight wallet"}
+                  </span>
                 </div>
                 {lace.availableWallets.map((wallet) => (
                   <button
-                    key={wallet.rdns}
+                    key={wallet.id}
                     onClick={async () => {
                       setShowWalletPicker(false);
                       await lace.connectTo(wallet);
                     }}
                     className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-text-primary hover:bg-white/6 transition-colors"
                   >
-                    {wallet.icon ? (
+                    {wallet.api.icon ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={wallet.icon} alt="" className="w-5 h-5 rounded" />
+                      <img src={wallet.api.icon} alt="" className="w-5 h-5 rounded" />
                     ) : (
-                      <span className="w-5 h-5 rounded bg-white/10 flex items-center justify-center text-2xs">■</span>
+                      <span className="w-5 h-5 rounded bg-white/10 flex items-center justify-center text-2xs">
+                        ■
+                      </span>
                     )}
-                    <span>{wallet.name}</span>
+                    <span className="truncate">{wallet.api.name || wallet.id.slice(0, 8)}</span>
                   </button>
                 ))}
+                {lace.availableWallets.length === 0 &&
+                  MIDNIGHT_WALLET_LINKS.map((link) => (
+                    <a
+                      key={link.href}
+                      href={link.href}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="block px-3 py-2 text-sm text-accent hover:bg-white/6 transition-colors"
+                      onClick={() => setShowWalletPicker(false)}
+                    >
+                      {link.name} ↗
+                    </a>
+                  ))}
               </div>
             )}
           </div>
@@ -417,20 +626,34 @@ export function Topbar() {
   );
 }
 
-function StepBadge({ step, label, active, done }: { step: number; label: string; active?: boolean; done?: boolean }) {
+function StepBadge({
+  step,
+  label,
+  active,
+  done,
+}: {
+  step: number;
+  label: string;
+  active?: boolean;
+  done?: boolean;
+}) {
   return (
-    <div className={cn(
-      "flex items-center gap-1 px-1.5 py-0.5 rounded-sm transition-colors",
-      active && "bg-accent/15 text-accent",
-      done && "text-text-secondary",
-      !active && !done && "text-text-muted"
-    )}>
-      <span className={cn(
-        "w-3.5 h-3.5 rounded-sm flex items-center justify-center text-2xs font-mono",
-        active && "bg-accent text-white",
-        done && "bg-white/10 text-text-secondary",
-        !active && !done && "bg-white/5 text-text-dim"
-      )}>
+    <div
+      className={cn(
+        "flex items-center gap-1 px-1.5 py-0.5 rounded-sm transition-colors",
+        active && "bg-accent/15 text-accent",
+        done && "text-text-secondary",
+        !active && !done && "text-text-muted",
+      )}
+    >
+      <span
+        className={cn(
+          "w-3.5 h-3.5 rounded-sm flex items-center justify-center text-2xs font-mono",
+          active && "bg-accent text-white",
+          done && "bg-white/10 text-text-secondary",
+          !active && !done && "bg-white/5 text-text-dim",
+        )}
+      >
         {done ? "✓" : step}
       </span>
       <span>{label}</span>
