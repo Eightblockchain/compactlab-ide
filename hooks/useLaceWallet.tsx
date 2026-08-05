@@ -16,17 +16,18 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type {
-  ConnectedAPI,
-  InitialAPI,
-} from "@midnight-ntwrk/dapp-connector-api";
+import type { ConnectedAPI } from "@midnight-ntwrk/dapp-connector-api";
 import type { ConnectionStatus, WalletInfo } from "@/lib/hello-midnight/types";
+import {
+  isOneAmWallet,
+  listMidnightWallets,
+  type DetectedWallet,
+} from "@/lib/wallet-detect";
 
-export type DetectedWallet = {
-  /** Injection key under window.midnight (usually a UUID). */
-  id: string;
-  api: InitialAPI;
-};
+export type { DetectedWallet } from "@/lib/wallet-detect";
+export { isOneAmWallet, listMidnightWallets } from "@/lib/wallet-detect";
+/** v1 install link — CompactLab requires 1AM for wallet-side proving. */
+export { MIDNIGHT_WALLET_LINKS } from "@/lib/wallet-links";
 
 export interface UseMidnightWalletReturn {
   availableWallets: DetectedWallet[];
@@ -49,36 +50,6 @@ export type UseLaceWalletReturn = UseMidnightWalletReturn;
 const MidnightWalletContext = createContext<UseMidnightWalletReturn | null>(null);
 
 const TARGET_NETWORK = "preprod";
-
-/** v1 install link — CompactLab requires 1AM for wallet-side proving. */
-export const MIDNIGHT_WALLET_LINKS = [{ name: "1AM", href: "https://1am.xyz/" }] as const;
-
-export function isOneAmWallet(api: InitialAPI): boolean {
-  const name = (api.name ?? "").toLowerCase();
-  const rdns = String((api as { rdns?: string }).rdns ?? "").toLowerCase();
-  return (
-    name.includes("1am") ||
-    name.includes("1 am") ||
-    rdns.includes("1am") ||
-    rdns.includes("oneam")
-  );
-}
-
-/** All Midnight wallets that look like 1AM (v1 supported set). */
-export function listMidnightWallets(): DetectedWallet[] {
-  if (typeof window === "undefined") return [];
-  const midnight = window.midnight;
-  if (!midnight) return [];
-  return Object.entries(midnight)
-    .filter(
-      (entry): entry is [string, InitialAPI] =>
-        !!entry[1] &&
-        typeof entry[1] === "object" &&
-        typeof (entry[1] as InitialAPI).connect === "function" &&
-        isOneAmWallet(entry[1] as InitialAPI),
-    )
-    .map(([id, api]) => ({ id, api }));
-}
 
 function serializeErr(err: unknown): string {
   if (err instanceof Error) return err.message || err.name;

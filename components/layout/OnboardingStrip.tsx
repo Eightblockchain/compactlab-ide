@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useLaceWallet, MIDNIGHT_WALLET_LINKS } from "@/hooks/useLaceWallet";
+import { useLaceWallet } from "@/hooks/useLaceWallet";
+import { MIDNIGHT_WALLET_LINKS } from "@/lib/wallet-links";
 import { useIDEStore } from "@/store/ide";
 import { getDeployGate, getLiveCompactSource } from "@/lib/deploy-gate";
 import { cn } from "@/lib/utils";

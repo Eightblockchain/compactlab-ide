@@ -4,7 +4,9 @@ import { useIDEStore } from "@/store/ide";
 import { Button, StatusDot, Divider } from "@/components/ui";
 import { cn, formatAddress, generateId } from "@/lib/utils";
 import { useState, useRef, useEffect } from "react";
-import { useLaceWallet, MIDNIGHT_WALLET_LINKS, listMidnightWallets } from "@/hooks/useLaceWallet";
+import { useLaceWallet } from "@/hooks/useLaceWallet";
+import { listMidnightWallets } from "@/lib/wallet-detect";
+import { MIDNIGHT_WALLET_LINKS } from "@/lib/wallet-links";
 import type { CompileResult, DeployResult } from "@/lib/compact";
 import { compileCompact, makeLog, extractWitnesses } from "@/lib/compact";
 import {

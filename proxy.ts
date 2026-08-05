@@ -56,8 +56,8 @@ async function valid(token: string | undefined): Promise<boolean> {
   return mismatch === 0;
 }
 
-/** Edge middleware: session cookie + reject API if public secret missing. */
-export async function middleware(req: NextRequest) {
+/** Next.js proxy: session cookie + reject API if public secret missing. */
+export async function proxy(req: NextRequest) {
   const res = NextResponse.next();
   const isPublic =
     process.env.COMPACTLAB_PUBLIC === "true" || process.env.NODE_ENV === "production";

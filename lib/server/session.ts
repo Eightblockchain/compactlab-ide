@@ -31,8 +31,8 @@ export function verifySessionToken(token: string | undefined | null): string | n
 }
 
 /**
- * Read session id minted by middleware.
- * Does not set cookies (Edge middleware owns minting).
+ * Read session id minted by proxy.ts.
+ * Does not set cookies (Next.js proxy owns minting).
  */
 export async function requireSessionId(): Promise<string> {
   const jar = await cookies();
