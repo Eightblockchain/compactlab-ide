@@ -220,14 +220,22 @@ The simplest Midnight DApp: store a public message on-chain using a ZK contract.
 \`\`\`
 hello-world/
 ├── contracts/
-│   └── hello-world.compact   ← Compact ZK contract
+│   ├── hello-world.compact      ← Compact ZK contract
+│   └── managed/hello-world/     ← After \`npm run compile\`
+│       ├── compiler/
+│       ├── contract/
+│       ├── keys/
+│       └── zkir/
 ├── src/
-│   ├── providers.ts          ← SDK provider wiring (1AM proving)
-│   └── api.ts                ← Typed contract API (deploy, call, read)
-├── deployment.json           ← Filled in after deploy — contract address + tx hash
+│   ├── providers.ts             ← SDK provider wiring (1AM proving)
+│   └── api.ts                   ← Typed contract API (deploy, call, read)
+├── deployment.json              ← Filled after deploy — contract address + tx
 ├── package.json
 └── tsconfig.json
 \`\`\`
+
+\`dist/\` appears after \`npm run build\` (TypeScript). Private-state LevelDB
+(\`midnight-level-db\`) is created at runtime by the SDK — not source.
 
 ## Workflow
 
@@ -1240,15 +1248,19 @@ constructor() {
 
 // ─── Shared project scaffold ───────────────────────────────────────────────────
 // Every template gets these folders and files injected by buildProject.
-// Contracts + compile output in contracts/, TypeScript source in src/,
-// build artefacts in dist/, LevelDB private state in midnight-level-db/.
+// Matches Midnight getting-started layout:
+//   contracts/  (.compact source + managed/<name>/{compiler,contract,keys,zkir} after compile)
+//   src/        (TypeScript app code)
+// `dist/` is created by `tsc` (outDir) — not seeded empty in the IDE.
+// `midnight-level-db/` is the Level private-state DB name at runtime — not source.
 
 export const PROJECT_BASE_FOLDERS: TemplateFolder[] = [
-  { name: "contracts",         parentName: null },
-  { name: "src",               parentName: null },
-  { name: "dist",              parentName: null },
-  { name: "midnight-level-db", parentName: null },
+  { name: "contracts", parentName: null },
+  { name: "src", parentName: null },
 ];
+
+/** Runtime/build folders — hide in the explorer when empty (not Midnight source). */
+export const GENERATED_EMPTY_FOLDER_NAMES = new Set(["dist", "midnight-level-db", "node_modules"]);
 
 export function buildPackageJson(projectName: string, contractFile: string): TemplateFile {
   return {
@@ -1260,7 +1272,7 @@ export function buildPackageJson(projectName: string, contractFile: string): Tem
   "private": true,
   "type": "module",
   "scripts": {
-    "compile":      "compact compile +0.30.0 contracts/${contractFile} ./contracts",
+    "compile":      "compact compile +0.30.0 contracts/${contractFile} contracts/managed/${projectName}",
     "build":        "tsc",
     "typecheck":    "tsc --noEmit"
   },

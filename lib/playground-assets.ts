@@ -14,7 +14,8 @@ export function bundledAssetBase(slug: string): string {
 
 export function managedAssetBase(projectId: string): string {
   const safeId = projectId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
-  return `/api/zk/${safeId}`;
+  const api = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+  return `${api.replace(/\/$/, "")}/v1/zk/${safeId}`;
 }
 
 export function isDeployableTemplate(template: string): template is DeployableTemplate {
@@ -24,6 +25,28 @@ export function isDeployableTemplate(template: string): template is DeployableTe
 /** True if template is bundled OR the project has a full-ZK artifact URL. */
 export function canDeployProject(template: string, artifactBaseUrl?: string | null): boolean {
   return !!artifactBaseUrl || isDeployableTemplate(template);
+}
+
+/**
+ * Normalize a ZK asset base (relative `/contracts/…` or absolute API URL)
+ * into a browser-absolute URL with no trailing slash.
+ *
+ * Managed compiles return `http://localhost:4000/v1/zk/<id>` from the API —
+ * those must NOT be prefixed with `window.location.origin` or `new URL` fails.
+ */
+export function toAbsoluteAssetUrl(assetBase: string): string {
+  const trimmed = assetBase.trim().replace(/\/+$/, "");
+  if (!trimmed) {
+    throw new Error("Empty ZK asset base URL");
+  }
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed;
+  }
+  const path = trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
+  if (typeof window === "undefined") {
+    return path;
+  }
+  return `${window.location.origin}${path}`;
 }
 
 /** Resolve asset base for a template or managed compile. */

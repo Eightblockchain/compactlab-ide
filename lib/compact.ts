@@ -76,29 +76,52 @@ export interface DeployResult {
   error?: string;
 }
 
-/** Client helper: POST /api/compile and return typed result. */
+/** Client helper: POST /v1/compile on the shared API. */
 export async function compileCompact(
   code: string,
   options?: { projectId?: string; zk?: boolean },
 ): Promise<CompileResult & { pragmaNormalized?: boolean; normalizedCode?: string }> {
   const { normalizeCompactPragma } = await import("@/lib/version");
   const { code: normalizedCode, changed } = normalizeCompactPragma(code);
+  const { apiFetch, API_BASE } = await import("@/lib/api");
 
-  const res = await fetch("/api/compile", {
+  const res = await apiFetch("/v1/compile", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+    json: {
       code: normalizedCode,
       projectId: options?.projectId,
       zk: options?.zk ?? false,
-    }),
+    },
   });
+  void API_BASE;
 
-  const body = (await res.json()) as CompileResult & {
+  const text = await res.text();
+  let body: CompileResult & {
     error?: string;
     installHint?: string;
     details?: unknown;
   };
+  try {
+    body = text ? (JSON.parse(text) as typeof body) : ({} as typeof body);
+  } catch {
+    const snippet = text.trim().slice(0, 180) || res.statusText || "empty response";
+    return {
+      success: false,
+      duration: 0,
+      errors: [
+        {
+          line: 1,
+          column: 1,
+          message: `Compile service returned non-JSON (${res.status}): ${snippet}`,
+          severity: "error",
+        },
+      ],
+      mock: false,
+      pragmaNormalized: changed,
+      normalizedCode: changed ? normalizedCode : undefined,
+      error: snippet,
+    };
+  }
 
   if (!res.ok) {
     return {

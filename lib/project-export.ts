@@ -81,8 +81,9 @@ export async function exportProjectZip(project: Project): Promise<Blob> {
 
   if (project.artifactBaseUrl) {
     try {
-      const res = await fetch(
-        `/api/artifacts?base=${encodeURIComponent(project.artifactBaseUrl)}`,
+      const { apiFetch } = await import("@/lib/api");
+      const res = await apiFetch(
+        `/v1/artifacts?base=${encodeURIComponent(project.artifactBaseUrl)}`,
       );
       if (res.ok) {
         const data = (await res.json()) as {

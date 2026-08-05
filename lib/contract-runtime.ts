@@ -49,11 +49,13 @@ import {
   type PlaygroundPrivateState,
   type WitnessSpec,
 } from "@/lib/playground-witnesses";
+import { toAbsoluteAssetUrl } from "@/lib/playground-assets";
 export {
   BUNDLED_DEPLOYABLE,
   bundledAssetBase,
   managedAssetBase,
   resolveAssetBase,
+  toAbsoluteAssetUrl,
 } from "@/lib/playground-assets";
 
 export type ContractSlug = "hello-world" | "counter" | string;
@@ -85,7 +87,7 @@ export async function createContractProviders(
   const addresses = await wallet.getShieldedAddresses();
   const coinPublicKey = addresses.shieldedCoinPublicKey;
 
-  const zkConfigBaseUrl = `${window.location.origin}${zkConfigBasePath}`;
+  const zkConfigBaseUrl = toAbsoluteAssetUrl(zkConfigBasePath);
   const zkConfigProvider = new FetchZkConfigProvider<string>(
     zkConfigBaseUrl,
     (url: string | Request | URL, init?: RequestInit) => window.fetch(url, init),
@@ -152,14 +154,14 @@ async function loadContractModule(assetBase: string): Promise<any> {
 
 /** Witness names required by Compact-generated Contract constructor checks. */
 async function detectWitnessNames(assetBase: string): Promise<string[]> {
-  const url = `${window.location.origin}${assetBase}/contract/index.js`;
+  const url = `${toAbsoluteAssetUrl(assetBase)}/contract/index.js`;
   const res = await fetch(url);
   if (!res.ok) return [];
   const src = await res.text();
   const names = new Set<string>();
   const re = /typeof\s*\(\s*witnesses_0\.(\w+)\s*\)\s*!==\s*['"]function['"]/g;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(src)) !== null) names.add(m[1]);
+  while ((m = re.exec(src)) !== null) names.add(m[1]!);
   return [...names];
 }
 

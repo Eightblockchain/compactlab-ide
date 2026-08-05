@@ -14,6 +14,8 @@
  * this module is reachable from client panels and would crash SSR.
  */
 
+import { toAbsoluteAssetUrl } from "@/lib/playground-assets";
+
 const RUNTIME_GLOBAL = "__MN_COMPACT_RUNTIME__" as const;
 
 function rewriteCompactRuntimeImports(src: string): string {
@@ -60,7 +62,7 @@ export async function loadBrowserContractModule(assetBase: string): Promise<any>
 
   await ensureRuntimeGlobal();
 
-  const url = `${window.location.origin}${assetBase}/contract/index.js`;
+  const url = `${toAbsoluteAssetUrl(assetBase)}/contract/index.js`;
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(`Failed to fetch contract module (${res.status}): ${url}`);
