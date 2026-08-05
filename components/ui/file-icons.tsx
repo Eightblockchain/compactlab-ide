@@ -63,7 +63,7 @@ export function getFolderColor(name: string): string {
   const n = name.toLowerCase();
   if (/^src$|^source$/.test(n)) return "#DCB67A";
   if (/^(dist|build|out|output|generated)$/.test(n)) return "#A3BE8C";
-  if (/^(node_modules|\.npm)$/.test(n)) return "#BF616A";
+  if (/^(node_modules|\.npm|midnight-level-db)$/.test(n)) return "#BF616A";
   if (/^(test|tests|__tests__|spec|specs)$/.test(n)) return "#88C0D0";
   if (/^(public|static|assets|media)$/.test(n)) return "#EBCB8B";
   if (/^(components|ui|views|pages|layouts)$/.test(n)) return "#81A1C1";
@@ -75,7 +75,10 @@ export function getFolderColor(name: string): string {
   if (/^(api|services|service|server)$/.test(n)) return "#E06C75";
   if (/^(config|configs|settings|\.config)$/.test(n)) return "#98C379";
   if (/^(docs|documentation|doc)$/.test(n)) return "#61AFEF";
+  // Midnight Compact layout (docs: contracts/managed/<name>/{compiler,contract,keys,zkir})
   if (/^(contracts|contract)$/.test(n)) return "#7C5CBF";
+  if (/^managed$/.test(n)) return "#9B7BD4";
+  if (/^(compiler|zkir|keys)$/.test(n)) return "#6B8CAD";
   if (/^(scripts|script)$/.test(n)) return "#E5C07B";
   return "#DCB67A";
 }

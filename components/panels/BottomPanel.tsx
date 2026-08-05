@@ -7,6 +7,8 @@ import { cn, formatTimestamp } from "@/lib/utils";
 import type { LogEntry } from "@/lib/compact";
 import type { LogTab } from "@/store/ide";
 import { oneAmContractUrl, oneAmTxUrl } from "@/lib/explorers";
+import { useLaceWallet } from "@/hooks/useLaceWallet";
+import { ZkArtifactsPanel } from "@/components/panels/ZkArtifactsPanel";
 
 export function BottomPanel() {
   const { logTab, setLogTab, bottomPanelOpen, setBottomPanelOpen, logs, clearLogs } = useIDEStore();
@@ -208,9 +210,15 @@ function CompilePanel() {
           {compileResult.success && compileResult.artifacts && (
             <div className="text-xs font-mono text-text-secondary space-y-1 p-3 bg-surface-2 border border-border rounded-md">
               <p>contract/: {compileResult.artifacts.contract.join(", ") || "—"}</p>
-              <p>keys/: {compileResult.artifacts.keys.join(", ") || "(empty — not deployable)"}</p>
+              <p>keys/: {compileResult.artifacts.keys.join(", ") || "(empty - not deployable)"}</p>
               <p>zkir/: {compileResult.artifacts.zkir.join(", ") || "—"}</p>
               <p>compiler/: {compileResult.artifacts.compiler.join(", ") || "—"}</p>
+            </div>
+          )}
+
+          {compileResult.success && !compileResult.skipZk && (
+            <div className="p-3 bg-surface-2 border border-border rounded-md">
+              <ZkArtifactsPanel />
             </div>
           )}
 
@@ -273,6 +281,9 @@ function CompilePanel() {
 
 function NetworkPanel() {
   const { wallet, deployResult, status } = useIDEStore();
+  const lace = useLaceWallet();
+  const dustEmpty = lace.dustBalance?.isEmpty === true;
+  const dustUnknown = wallet.connected && !lace.dustBalance && wallet.balance === "Loading…";
 
   return (
     <div className="h-full overflow-y-auto p-4 space-y-4">
@@ -284,25 +295,80 @@ function NetworkPanel() {
             <span className="text-xs text-text-muted">Status</span>
             <StatusDot
               status={wallet.connected ? "success" : "idle"}
-              label={wallet.connected ? "Connected" : "Disconnected"}
+              label={wallet.connected ? "Connected (1AM)" : "Disconnected"}
             />
           </div>
           {wallet.connected && wallet.address && (
             <>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <span className="text-xs text-text-muted">Address</span>
-                <span className="text-xs font-mono text-text-secondary">
+                <span className="text-xs font-mono text-text-secondary truncate max-w-[60%]" title={wallet.address}>
                   {wallet.address.slice(0, 10)}…{wallet.address.slice(-6)}
                 </span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-text-muted">Balance</span>
-                <span className="text-xs font-mono text-text-primary">{wallet.balance ?? "—"}</span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-text-muted">tDUST</span>
+                <span
+                  className={cn(
+                    "text-xs font-mono",
+                    dustEmpty ? "text-warning" : "text-text-primary",
+                  )}
+                  title="Spendable Dust from 1AM getDustBalance()"
+                >
+                  {wallet.balance ?? "—"}
+                </span>
               </div>
+              {wallet.dustCap && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-text-muted">tDUST cap</span>
+                  <span
+                    className="text-xs font-mono text-text-secondary"
+                    title="Max Dust generable from your current tNIGHT"
+                  >
+                    {wallet.dustCap}
+                  </span>
+                </div>
+              )}
               <div className="flex items-center justify-between">
                 <span className="text-xs text-text-muted">Network</span>
                 <span className="text-xs font-mono text-info">{wallet.network}</span>
               </div>
+              {(dustEmpty || dustUnknown) && (
+                <p className="text-2xs text-warning leading-relaxed pt-1 border-t border-border/60">
+                  {dustEmpty
+                    ? "tDUST is 0. Fund tNIGHT from the faucet, then wait for Dust to generate before Deploy."
+                    : "Could not read Dust yet. Click refresh or reconnect 1AM."}
+                  {" "}
+                  <a
+                    href="https://faucet.preprod.midnight.network/"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-accent hover:underline"
+                  >
+                    Faucet
+                  </a>
+                  {" · "}
+                  <button
+                    type="button"
+                    className="text-accent hover:underline"
+                    onClick={() => void lace.refreshDustBalance()}
+                  >
+                    Refresh
+                  </button>
+                </p>
+              )}
+              {!dustEmpty && lace.dustBalance && (
+                <p className="text-2xs text-text-dim leading-relaxed pt-1 border-t border-border/60">
+                  Exact Deploy fees vary by proof size. Refresh before Deploy if unsure.{" "}
+                  <button
+                    type="button"
+                    className="text-accent hover:underline"
+                    onClick={() => void lace.refreshDustBalance()}
+                  >
+                    Refresh tDUST
+                  </button>
+                </p>
+              )}
             </>
           )}
         </div>
