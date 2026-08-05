@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { API_BASE } from "@/lib/api";
 
 type Status = {
   mode?: string;
@@ -15,7 +16,7 @@ export function PublicModeBanner() {
 
   useEffect(() => {
     let cancelled = false;
-    void fetch("/api/health")
+    void fetch(`${API_BASE}/v1/health`)
       .then((r) => r.json())
       .then((j) => {
         if (!cancelled) setStatus(j);
@@ -30,15 +31,15 @@ export function PublicModeBanner() {
 
   return (
     <div className="flex-shrink-0 border-b border-border bg-surface-2 px-4 py-1.5 text-2xs text-text-muted">
-      Public Preprod lab
+      Public Preprod lab · wallet: <span className="text-text-secondary">1AM only</span>
       {status.compileEnabled === false ? (
         <span>
           {" "}
-          · Instant Deploy (Hello / Counter) enabled · server Compile off (set{" "}
-          <code className="text-text-secondary">COMPACTLAB_ENABLE_COMPILE</code> to allow)
+          · server Compile off · only unedited Hello/Counter can Deploy (set{" "}
+          <code className="text-text-secondary">COMPACTLAB_ENABLE_COMPILE=true</code>)
         </span>
       ) : (
-        <span> · Compile rate-limited · managed keys private under /api/zk</span>
+        <span> · Compile then Deploy · Hello/Counter also ship bundled keys</span>
       )}
     </div>
   );

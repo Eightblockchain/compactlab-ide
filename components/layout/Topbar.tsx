@@ -2,22 +2,18 @@
 
 import { useIDEStore } from "@/store/ide";
 import { Button, StatusDot, Divider } from "@/components/ui";
-import { cn, formatAddress, generateId } from "@/lib/utils";
+import { cn, generateId } from "@/lib/utils";
 import { useState, useRef, useEffect } from "react";
 import { useLaceWallet } from "@/hooks/useLaceWallet";
-import { listMidnightWallets } from "@/lib/wallet-detect";
-import { MIDNIGHT_WALLET_LINKS } from "@/lib/wallet-links";
-import type { CompileResult, DeployResult } from "@/lib/compact";
+import { useAuth } from "@/hooks/useAuth";
+import type { DeployResult } from "@/lib/compact";
 import { compileCompact, makeLog, extractWitnesses } from "@/lib/compact";
 import {
   deployPlaygroundContract,
 } from "@/lib/playground-deploy";
 import { getDeployGate, getLiveCompactSource } from "@/lib/deploy-gate";
 import { exportProjectZip, downloadBlob } from "@/lib/project-export";
-
-function countMidnightWallets(): number {
-  return listMidnightWallets().length;
-}
+import type { UserPublic, Entitlements } from "@/lib/api";
 
 export function Topbar() {
   const {
@@ -44,13 +40,17 @@ export function Topbar() {
   } = useIDEStore();
 
   const lace = useLaceWallet();
+  const { user, entitlements, logout, checkout, portal } = useAuth();
 
   useEffect(() => {
     if (lace.status === "connected" && lace.walletInfo) {
       setWalletState({
         connected: true,
         address: lace.walletInfo.unshieldedAddress,
-        balance: null,
+        balance: lace.dustBalance
+          ? `${lace.dustBalance.balanceLabel} tDUST`
+          : "Loading…",
+        dustCap: lace.dustBalance ? `${lace.dustBalance.capLabel} tDUST` : null,
         network: "Midnight Preprod",
       });
     } else if (lace.status === "disconnected" || lace.status === "error") {
@@ -58,10 +58,11 @@ export function Topbar() {
         connected: false,
         address: null,
         balance: null,
+        dustCap: null,
         network: "Midnight Preprod",
       });
     }
-  }, [lace.status, lace.walletInfo, setWalletState]);
+  }, [lace.status, lace.walletInfo, lace.dustBalance, setWalletState]);
 
   useEffect(() => {
     if (lace.status === "error" && lace.error) {
@@ -74,19 +75,7 @@ export function Topbar() {
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
-  const [showWalletPicker, setShowWalletPicker] = useState(false);
-  const walletPickerRef = useRef<HTMLDivElement>(null);
   const [exporting, setExporting] = useState(false);
-
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (walletPickerRef.current && !walletPickerRef.current.contains(e.target as Node)) {
-        setShowWalletPicker(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
 
   const resolveCompactCode = (): { code: string; ok: boolean } => {
     let compileCode = code;
@@ -245,7 +234,7 @@ export function Topbar() {
         addLog(
           makeLog(
             "info",
-            "Click Compile (full ZK) to generate proving keys for your current source, then Deploy.",
+            "Flow: Compile (full ZK) → Connect 1AM → Deploy. Hello/Counter can Deploy with bundled keys if unedited.",
             "compiler",
           ),
         );
@@ -255,12 +244,21 @@ export function Topbar() {
 
     clearLogs();
     setBottomPanelOpen(true);
+    setLogTab("network");
 
     if (gate.usingBundled) {
       addLog(
         makeLog(
           "info",
-          "Deploying bundled Preprod assets for this template (source matches the original). Edit + Compile to deploy your own keys.",
+          "Deploying bundled Preprod assets for Hello/Counter (source matches template). You can Compile first if you want your own keys.",
+          "network",
+        ),
+      );
+    } else {
+      addLog(
+        makeLog(
+          "info",
+          "Deploying with your last Compile (ZK) artifacts. CompactLab requires the 1AM wallet (https://1am.xyz/).",
           "network",
         ),
       );
@@ -268,24 +266,46 @@ export function Topbar() {
 
     let connectedAPI = lace.connectedAPI;
     if (!connectedAPI) {
-      setLogTab("network");
-      addLog(makeLog("info", "Connecting to Midnight wallet…", "network"));
+      addLog(makeLog("info", "Connecting to 1AM wallet…", "network"));
       connectedAPI = await lace.connect();
       if (!connectedAPI) {
         addLog(
           makeLog(
             "error",
             lace.error ??
-              "Could not connect. Install 1AM from https://1am.xyz/, unlock it, approve this site, then retry.",
+              "Could not connect. CompactLab only supports 1AM (https://1am.xyz/). Install it, unlock it, set Preprod, approve this site, then retry.",
             "network",
           ),
         );
         return;
       }
-      addLog(makeLog("success", "Wallet connected.", "network"));
+      addLog(makeLog("success", "1AM connected.", "network"));
     }
 
-    addLog(makeLog("info", "Need tDUST for fees: https://faucet.preprod.midnight.network/", "network"));
+    addLog(makeLog("info", "Checking tDUST balance before Deploy…", "network"));
+    try {
+      const dust = await lace.refreshDustBalance();
+      if (dust) {
+        addLog(
+          makeLog(
+            "info",
+            `tDUST balance: ${dust.balanceLabel} (cap ${dust.capLabel})`,
+            "network",
+          ),
+        );
+        if (dust.isEmpty) {
+          addLog(
+            makeLog(
+              "warn",
+              "tDUST is 0. Fund tNIGHT at https://faucet.preprod.midnight.network/ and wait for Dust generation, then retry Deploy.",
+              "network",
+            ),
+          );
+        }
+      }
+    } catch {
+      /* non-fatal: Deploy may still work if 1AM sponsors fees */
+    }
 
     const compactFile = activeProject?.files.find((f) => f.language === "compact");
     if (!compactFile) {
@@ -293,45 +313,11 @@ export function Topbar() {
       return;
     }
 
-    // Bundled Instant Deploy: skip server Compile (no CLI required).
-    // Edited / custom projects already gated to require full ZK Compile first.
-    if (!gate.usingBundled) {
-      setLogTab("compile");
-      setStatus("compiling");
-      let compileResult: CompileResult;
-      try {
-        compileResult = await compileCompact(compactFile.content, {
-          projectId: activeProject?.id,
-          zk: false,
-        });
-        setCompileResult(compileResult);
-      } catch {
-        addLog(makeLog("error", "Compilation failed: could not reach compile service", "compiler"));
-        setStatus("idle");
-        return;
-      }
-
-      if (!compileResult.success) {
-        const errCount = compileResult.errors?.length ?? 0;
-        addLog(makeLog("error", `Compilation failed: ${errCount} error(s). Fix before deploying.`, "compiler"));
-        compileResult.errors?.forEach((e) => {
-          addLog(makeLog("error", `Line ${e.line}, Col ${e.column}: ${e.message}`, "compiler"));
-        });
-        setStatus("idle");
-        return;
-      }
-
-      addLog(makeLog("success", "Syntax/typecheck OK", "compiler"));
-    } else {
-      addLog(makeLog("info", "Skipping server typecheck (bundled Instant Deploy).", "compiler"));
-    }
-
     // Witness *values* are not required at deploy (constructor typically does not
     // call them). Official bboard seeds a random private state bag for the SDK.
     // User-supplied values are required later at Call.
     const witnessSpecs = extractWitnesses(compactFile.content);
 
-    setLogTab("network");
     setStatus("deploying");
 
     let deployResult: DeployResult;
@@ -344,7 +330,6 @@ export function Topbar() {
           artifactBaseUrl,
           projectId: activeProject?.id,
           witnessSpecs,
-          // Optional at deploy — used only if the user already filled Contract UI
           witnessValues,
         },
       );
@@ -361,7 +346,7 @@ export function Topbar() {
       addLog(
         makeLog(
           "success",
-          "Next: open Contract UI on the right, then Call a circuit (e.g. storeMessage / increment). Proofs take 1-2 min.",
+          "deployment.json updated with contract address. Next: Contract UI → Call a circuit. Proofs take 1-2 min in 1AM.",
           "network",
         ),
       );
@@ -395,7 +380,37 @@ export function Topbar() {
     compiledSourceHash: activeProject?.compiledSourceHash,
     currentSource: liveSource,
   });
-  const deployEnabled = !isRunning && deployGate.canDeploy;
+  const compileAllowed = entitlements?.compileAllowed !== false;
+  const deployEnabled = !isRunning && !!activeProject && deployGate.canDeploy;
+  const walletConnected = lace.status === "connected" && !!lace.connectedAPI;
+  const walletLabel =
+    lace.walletInfo?.unshieldedAddress
+      ? `${lace.walletInfo.unshieldedAddress.slice(0, 6)}…${lace.walletInfo.unshieldedAddress.slice(-4)}`
+      : "1AM";
+
+  const handleWalletClick = async () => {
+    if (walletConnected) {
+      lace.disconnect();
+      addLog(makeLog("info", "1AM disconnected.", "network"));
+      return;
+    }
+    setLogTab("network");
+    setBottomPanelOpen(true);
+    addLog(makeLog("info", "Connecting to 1AM (only supported wallet)…", "network"));
+    const api = await lace.connect();
+    if (!api) {
+      addLog(
+        makeLog(
+          "error",
+          lace.error ??
+            "1AM required. Install from https://1am.xyz/, unlock, select Preprod, approve this site.",
+          "network",
+        ),
+      );
+      return;
+    }
+    addLog(makeLog("success", "1AM connected.", "network"));
+  };
 
   const handleExport = async () => {
     if (!activeProject || exporting) return;
@@ -469,38 +484,12 @@ export function Topbar() {
 
       <div className="flex-1" />
 
-      {/* Live status */}
-      <div className="hidden md:flex items-center gap-3 text-xs mr-2">
-        <span className="flex items-center gap-1.5 text-text-muted" title="ZK proving via 1AM wallet">
-          <span
-            className={cn(
-              "w-1.5 h-1.5 rounded-full",
-              lace.status === "connected" ? "bg-success" : "bg-text-dim",
-            )}
-          />
-          Prove {lace.status === "connected" ? "1AM" : "off"}
-        </span>
-        <span className="flex items-center gap-1.5 text-text-muted">
-          <span
-            className={cn(
-              "w-1.5 h-1.5 rounded-full",
-              lace.status === "connected"
-                ? "bg-success"
-                : lace.status === "error"
-                  ? "bg-error"
-                  : "bg-text-dim",
-            )}
-          />
-          Wallet{" "}
-          {lace.status === "connected"
-            ? lace.connectedWalletName
-              ? lace.connectedWalletName.slice(0, 12)
-              : "on"
-            : lace.status === "error"
-              ? "error"
-              : lace.status === "connecting"
-                ? "…"
-                : "off"}
+      <div className="hidden md:flex items-center mr-3">
+        <span
+          className="text-2xs uppercase tracking-wide px-2 py-1 rounded-md border border-border/80 text-text-muted bg-white/[0.02]"
+          title="Midnight Preprod. Deploy and Call require the 1AM wallet only."
+        >
+          Preprod · 1AM
         </span>
       </div>
 
@@ -526,13 +515,39 @@ export function Topbar() {
 
       <div className="flex items-center gap-2">
         <Button
+          variant={walletConnected ? "default" : "default"}
+          size="md"
+          onClick={() => void handleWalletClick()}
+          disabled={isRunning || lace.status === "connecting"}
+          loading={lace.status === "connecting"}
+          className="gap-1.5"
+          title={
+            walletConnected
+              ? "Disconnect 1AM"
+              : "Connect 1AM wallet (required for Deploy/Call). Other wallets are not supported."
+          }
+        >
+          <span
+            className={cn(
+              "w-1.5 h-1.5 rounded-full",
+              walletConnected ? "bg-success" : "bg-text-muted",
+            )}
+          />
+          {walletConnected ? walletLabel : "Connect 1AM"}
+        </Button>
+
+        <Button
           variant="default"
           size="md"
           onClick={() => void handleCompile(true)}
           loading={status === "compiling"}
-          disabled={isRunning}
+          disabled={isRunning || !activeProject || !compileAllowed}
           className="gap-1.5"
-          title="Full Compact compile (produces proving keys for your edits)"
+          title={
+            compileAllowed
+              ? "Full Compact compile (ZK keys). Required before Deploy except unedited Hello/Counter."
+              : "Server Compile is disabled on this host"
+          }
         >
           <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
             <path d="M2 2.5L10 6L2 9.5V2.5z" />
@@ -545,11 +560,15 @@ export function Topbar() {
           size="md"
           onClick={() => void handleCompile(false)}
           loading={status === "compiling"}
-          disabled={isRunning}
+          disabled={isRunning || !activeProject || !compileAllowed}
           className="gap-1.5"
-          title="Fast syntax/type check only (no proving keys)"
+          title={
+            compileAllowed
+              ? "Typecheck only (--skip-zk). Does not unlock Deploy."
+              : "Server Compile is disabled on this host"
+          }
         >
-          Check syntax
+          Typecheck
         </Button>
 
         <Button
@@ -559,7 +578,13 @@ export function Topbar() {
           loading={status === "deploying"}
           disabled={!deployEnabled}
           className="gap-1.5"
-          title={deployGate.reason}
+          title={
+            !activeProject
+              ? "Create or open a project first"
+              : deployGate.canDeploy
+                ? `${deployGate.reason} Requires 1AM.`
+                : deployGate.reason
+          }
         >
           <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M6 1v7M3 5l3-4 3 4M1 10h10" strokeLinecap="round" strokeLinejoin="round" />
@@ -579,109 +604,186 @@ export function Topbar() {
           Export
         </Button>
 
-        <Divider vertical className="mx-1 h-5" />
+        <Divider vertical className="mx-1 h-5 self-center" />
 
-        {lace.status === "connected" && lace.walletInfo ? (
-          <button
-            onClick={lace.disconnect}
-            className={cn(
-              "flex items-center gap-1.5 rounded px-2.5 py-1.5 h-7",
-              "border border-success/20 bg-success/8 text-success text-sm font-medium",
-              "hover:bg-success/12 transition-colors",
-            )}
-            title={`Connected to ${lace.connectedWalletName ?? "wallet"} (click to disconnect)`}
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-success" />
-            {formatAddress(lace.walletInfo.unshieldedAddress)}
-          </button>
-        ) : (
-          <div className="relative" ref={walletPickerRef}>
-            <Button
-              variant={lace.status === "error" ? "accent" : "default"}
-              size="md"
-              onClick={() => {
-                lace.refreshWallets();
-                const count = countMidnightWallets();
-                if (count === 0) {
-                  setShowWalletPicker(true);
-                  return;
-                }
-                if (count > 1) {
-                  setShowWalletPicker((v) => !v);
-                  return;
-                }
-                void lace.connect();
-              }}
-              loading={lace.status === "connecting"}
-              disabled={lace.status === "connecting"}
-              className="gap-1.5"
-              title={
-                lace.status === "error"
-                  ? lace.error
-                    ? `${lace.error} (click to retry)`
-                    : "Connection failed (click to retry)"
-                  : lace.isInstalled
-                    ? "Connect 1AM wallet (Preprod)"
-                    : "1AM not detected. Install from https://1am.xyz/ and reload"
-              }
-            >
-              {lace.status === "connecting"
-                ? "Connecting…"
-                : lace.status === "error"
-                  ? "Retry Wallet"
-                  : !lace.isInstalled
-                    ? "Install 1AM ▾"
-                    : lace.availableWallets.length > 1
-                      ? "Connect 1AM ▾"
-                      : "Connect 1AM"}
-            </Button>
-
-            {showWalletPicker && (
-              <div className="absolute right-0 top-full mt-1 z-50 min-w-[220px] bg-surface-2 border border-border rounded-md shadow-lg overflow-hidden">
-                <div className="px-3 py-1.5 border-b border-border">
-                  <span className="text-2xs text-text-muted uppercase tracking-wide">
-                    {lace.availableWallets.length > 0 ? "Choose 1AM" : "Install 1AM"}
-                  </span>
-                </div>
-                {lace.availableWallets.map((wallet) => (
-                  <button
-                    key={wallet.id}
-                    onClick={async () => {
-                      setShowWalletPicker(false);
-                      await lace.connectTo(wallet);
-                    }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-text-primary hover:bg-white/6 transition-colors"
-                  >
-                    {wallet.api.icon ? (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img src={wallet.api.icon} alt="" className="w-5 h-5 rounded" />
-                    ) : (
-                      <span className="w-5 h-5 rounded bg-white/10 flex items-center justify-center text-2xs">
-                        ■
-                      </span>
-                    )}
-                    <span className="truncate">{wallet.api.name || wallet.id.slice(0, 8)}</span>
-                  </button>
-                ))}
-                {lace.availableWallets.length === 0 &&
-                  MIDNIGHT_WALLET_LINKS.map((link) => (
-                    <a
-                      key={link.href}
-                      href={link.href}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="block px-3 py-2 text-sm text-accent hover:bg-white/6 transition-colors"
-                      onClick={() => setShowWalletPicker(false)}
-                    >
-                      {link.name} ↗
-                    </a>
-                  ))}
-              </div>
-            )}
-          </div>
+        {user && (
+          <ProfileMenu
+            user={user}
+            entitlements={entitlements}
+            onUpgrade={() => void checkout().catch(() => {})}
+            onBilling={() => void portal().catch(() => {})}
+            onLogout={() => void logout()}
+          />
         )}
       </div>
     </header>
+  );
+}
+
+function initialsFor(user: UserPublic): string {
+  const base = (user.name || user.email || "?").trim();
+  const parts = base.split(/[\s@._-]+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return (parts[0]![0]! + parts[1]![0]!).toUpperCase();
+  }
+  return base.slice(0, 2).toUpperCase();
+}
+
+function ProfileMenu({
+  user,
+  entitlements,
+  onUpgrade,
+  onBilling,
+  onLogout,
+}: {
+  user: UserPublic;
+  entitlements: Entitlements | null;
+  onUpgrade: () => void;
+  onBilling: () => void;
+  onLogout: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const planLabel = entitlements?.planSlug === "paid" ? "Pro" : "Free";
+  const displayName = user.name?.trim() || user.email.split("@")[0] || "Account";
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative" ref={menuRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          "flex items-center gap-2 rounded-full pl-0.5 pr-2 py-0.5",
+          "border border-border/80 bg-white/[0.03] hover:bg-white/[0.06]",
+          "transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-accent/50",
+        )}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        title={user.email}
+      >
+        <span className="relative w-8 h-8 rounded-full overflow-hidden flex-shrink-0 ring-1 ring-white/10">
+          {user.imageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={user.imageUrl}
+              alt=""
+              className="w-full h-full object-cover"
+              referrerPolicy="no-referrer"
+            />
+          ) : (
+            <span className="w-full h-full flex items-center justify-center bg-gradient-to-br from-accent/80 to-accent/40 text-[11px] font-semibold text-white tracking-wide">
+              {initialsFor(user)}
+            </span>
+          )}
+        </span>
+        <span className="hidden sm:flex flex-col items-start leading-tight min-w-0 pr-0.5">
+          <span className="text-xs text-text-primary font-medium truncate max-w-[120px]">
+            {displayName}
+          </span>
+          <span className="text-2xs text-text-muted">{planLabel}</span>
+        </span>
+        <svg
+          className={cn("w-3 h-3 text-text-muted transition-transform", open && "rotate-180")}
+          viewBox="0 0 12 12"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          aria-hidden
+        >
+          <path d="M3 4.5L6 7.5L9 4.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute right-0 top-full mt-2 z-50 w-64 rounded-lg border border-border bg-surface-2 shadow-xl overflow-hidden"
+        >
+          <div className="px-3.5 py-3 border-b border-border flex items-center gap-3">
+            <span className="relative w-10 h-10 rounded-full overflow-hidden flex-shrink-0 ring-1 ring-white/10">
+              {user.imageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={user.imageUrl}
+                  alt=""
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : (
+                <span className="w-full h-full flex items-center justify-center bg-gradient-to-br from-accent/80 to-accent/40 text-xs font-semibold text-white">
+                  {initialsFor(user)}
+                </span>
+              )}
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm text-text-primary font-medium truncate">{displayName}</p>
+              <p className="text-2xs text-text-muted truncate">{user.email}</p>
+            </div>
+          </div>
+
+          <div className="px-2 py-2 space-y-0.5">
+            <div className="flex items-center justify-between px-2 py-1.5 text-xs text-text-muted">
+              <span>Plan</span>
+              <span className="text-text-secondary font-medium">{planLabel}</span>
+            </div>
+            {entitlements?.planSlug !== "paid" ? (
+              <button
+                type="button"
+                role="menuitem"
+                className="w-full text-left px-2 py-2 rounded-md text-sm text-text-primary hover:bg-white/6 transition-colors"
+                onClick={() => {
+                  setOpen(false);
+                  onUpgrade();
+                }}
+              >
+                Upgrade to Pro
+              </button>
+            ) : (
+              <button
+                type="button"
+                role="menuitem"
+                className="w-full text-left px-2 py-2 rounded-md text-sm text-text-primary hover:bg-white/6 transition-colors"
+                onClick={() => {
+                  setOpen(false);
+                  onBilling();
+                }}
+              >
+                Manage billing
+              </button>
+            )}
+            <button
+              type="button"
+              role="menuitem"
+              className="w-full text-left px-2 py-2 rounded-md text-sm text-text-muted hover:text-text-primary hover:bg-white/6 transition-colors"
+              onClick={() => {
+                setOpen(false);
+                onLogout();
+              }}
+            >
+              Log out
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -14,7 +14,7 @@ interface Checks {
 }
 
 /**
- * Two lanes: quick start (bundled Hello/Counter) or from-scratch (template → Compile → Deploy).
+ * Flow: project → Connect 1AM → Compile (unless bundled Hello/Counter) → Deploy → Call.
  */
 export function OnboardingStrip() {
   const wallet = useLaceWallet();
@@ -43,7 +43,8 @@ export function OnboardingStrip() {
       let compact: boolean | null = null;
       let compileEnabled: boolean | null = null;
       try {
-        const res = await fetch("/api/compile", { method: "GET" });
+        const { apiFetch } = await import("@/lib/api");
+        const res = await apiFetch("/v1/compile", { method: "GET" });
         const body = (await res.json().catch(() => ({}))) as {
           available?: boolean;
           compileEnabled?: boolean;
@@ -127,18 +128,9 @@ export function OnboardingStrip() {
             New project
           </button>
           <span className="text-text-dim mx-1.5">→</span>
-          Connect 1AM
+          <span className="text-text-primary font-medium">Connect 1AM</span>
           <span className="text-text-dim mx-1.5">→</span>
-          <a
-            href="https://faucet.preprod.midnight.network/"
-            target="_blank"
-            rel="noreferrer"
-            className="text-accent hover:underline"
-          >
-            tDUST
-          </a>
-          <span className="text-text-dim mx-1.5">→</span>
-          {needsCompile ? (
+          {needsCompile || !gate.usingBundled ? (
             <>
               <span className="text-text-primary font-medium">Compile</span>
               <span className="text-text-dim mx-1.5">→</span>
@@ -147,6 +139,15 @@ export function OnboardingStrip() {
           <span className="text-text-primary font-medium">Deploy</span>
           <span className="text-text-dim mx-1.5">→</span>
           <span className="text-text-primary font-medium">Call</span>
+          <span className="text-text-dim mx-1.5">·</span>
+          <a
+            href="https://faucet.preprod.midnight.network/"
+            target="_blank"
+            rel="noreferrer"
+            className="text-accent hover:underline"
+          >
+            tDUST faucet
+          </a>
         </span>
         <div className="flex-1" />
         <button
@@ -162,38 +163,47 @@ export function OnboardingStrip() {
         <span className="text-2xs text-text-dim uppercase tracking-wide flex-shrink-0">Needs</span>
         <Check
           ok={walletOk ? true : checks.wallet}
-          label={walletOk ? "1AM connected" : "1AM wallet"}
+          label={walletOk ? "1AM connected" : "1AM wallet only"}
           href={MIDNIGHT_WALLET_LINKS[0].href}
           onAction={!walletOk && checks.wallet ? () => void wallet.connect() : undefined}
+          hint="Lace and other Midnight wallets are not supported in CompactLab v1"
         />
         <Check
           ok={
             checks.compileEnabled === false
-              ? true
-              : checks.compact
+              ? gate.usingBundled
+              : needsCompile
+                ? checks.compact
+                : true
           }
           label={
             checks.compileEnabled === false
-              ? "Instant Deploy ready"
-              : "Compact CLI"
+              ? gate.usingBundled
+                ? "Bundled keys OK"
+                : "Compile disabled"
+              : needsCompile
+                ? "Compile required"
+                : gate.usingBundled
+                  ? "Bundled or Compile"
+                  : "Compiled"
           }
           href="https://docs.midnight.network/"
           hint={
             checks.compileEnabled === false
-              ? "Server Compile is off. Use unedited Hello/Counter, or enable COMPACTLAB_ENABLE_COMPILE on the host."
+              ? "Server Compile is off. Use unedited Hello/Counter, or set COMPACTLAB_ENABLE_COMPILE=true."
               : needsCompile
-                ? "Required to Compile this project before Deploy"
-                : "Optional for unedited Hello/Counter; required for your own contracts"
+                ? "Run Compile (full ZK), then Deploy. Typecheck alone does not unlock Deploy."
+                : "Hello/Counter can Deploy with bundled keys; other projects need Compile first."
           }
         />
         {readyToDeploy && (
           <span className="text-success flex-shrink-0">Ready. Click Deploy</span>
         )}
         {!readyToDeploy && walletOk && needsCompile && (
-          <span className="text-warning flex-shrink-0">Run Compile, then Deploy</span>
+          <span className="text-warning flex-shrink-0">Compile, then Deploy</span>
         )}
         {!walletOk && (
-          <span className="text-text-muted flex-shrink-0">Connect 1AM to deploy</span>
+          <span className="text-text-muted flex-shrink-0">Connect 1AM (toolbar) to deploy</span>
         )}
       </div>
     </div>
@@ -218,29 +228,20 @@ function Check({
   const dot =
     ok === true ? "bg-success" : ok === false ? "bg-error" : "bg-text-dim";
 
-  const inner = (
-    <span className={cn("flex items-center gap-1.5", color)} title={hint}>
-      <span className={cn("w-1.5 h-1.5 rounded-full", dot)} />
-      {label}
-      {ok === false && href ? " ↗" : ""}
-      {onAction && ok !== true ? " (connect)" : ""}
+  return (
+    <span className={cn("inline-flex items-center gap-1.5", color)} title={hint}>
+      <span className={cn("w-1.5 h-1.5 rounded-full flex-shrink-0", dot)} />
+      {onAction ? (
+        <button type="button" onClick={onAction} className="hover:underline">
+          {label}
+        </button>
+      ) : href && ok !== true ? (
+        <a href={href} target="_blank" rel="noreferrer" className="hover:underline">
+          {label}
+        </a>
+      ) : (
+        label
+      )}
     </span>
   );
-
-  if (onAction && ok !== true) {
-    return (
-      <button type="button" onClick={onAction} className="hover:underline flex-shrink-0">
-        {inner}
-      </button>
-    );
-  }
-
-  if (ok === false && href) {
-    return (
-      <a href={href} target="_blank" rel="noreferrer" className="hover:underline flex-shrink-0">
-        {inner}
-      </a>
-    );
-  }
-  return <span className="flex-shrink-0">{inner}</span>;
 }

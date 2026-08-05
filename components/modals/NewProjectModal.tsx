@@ -202,7 +202,7 @@ function ModalContent({ initialTemplate, onClose }: { initialTemplate: string; o
           <div>
             <h2 className="text-sm font-semibold text-text-primary leading-none">New Project</h2>
             <p className="text-xs text-text-muted mt-0.5">
-              From scratch or a template · Compile · Deploy with 1AM
+              Compile then Deploy with 1AM · Hello/Counter ship bundled keys
             </p>
           </div>
         </div>
@@ -237,7 +237,7 @@ function ModalContent({ initialTemplate, onClose }: { initialTemplate: string; o
             className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md"
             style={{ background: "rgba(255,255,255,0.03)" }}
           >
-            <span className="font-mono text-xs text-text-muted">browser project:</span>
+            <span className="font-mono text-xs text-text-muted">project id:</span>
             <span className="font-mono text-xs" style={{ color: name.trim() ? "#F06358" : "#636360" }}>
               {slugPreview || "…"}
             </span>
@@ -306,7 +306,7 @@ function ModalContent({ initialTemplate, onClose }: { initialTemplate: string; o
                           : "text-warning bg-warning/12",
                       )}
                     >
-                      {isDeployableTemplate(id) ? "Instant deploy" : "Needs Compile"}
+                      {isDeployableTemplate(id) ? "Bundled keys" : "Compile then Deploy"}
                     </span>
                   </div>
                   {isSelected && (

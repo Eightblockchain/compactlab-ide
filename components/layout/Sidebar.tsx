@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useIDEStore } from "@/store/ide";
 import type { Project, ProjectFile, ProjectFolder } from "@/store/ide";
 import { Divider, IconButton } from "@/components/ui";
 import { FileIcon, FolderIcon, MidnightIcon, getFolderColor } from "@/components/ui/file-icons";
 import { cn } from "@/lib/utils";
-import { COMPACT_TEMPLATES } from "@/lib/constants";
+import { COMPACT_TEMPLATES, GENERATED_EMPTY_FOLDER_NAMES } from "@/lib/constants";
 import { APP_VERSION } from "@/lib/version";
 import { isDeployableTemplate } from "@/lib/playground-deploy";
 
@@ -21,6 +21,101 @@ function formatRelativeTime(ts: number): string {
   if (hours > 0) return `${hours}h ago`;
   if (mins > 0) return `${mins}m ago`;
   return "just now";
+}
+
+/** VS Code / Cursor default explorer order: folders first, then files; both A→Z. */
+function byNameAsc<T extends { name: string }>(a: T, b: T): number {
+  return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+}
+
+function folderHasContent(
+  folderId: string,
+  allFolders: ProjectFolder[],
+  allFiles: ProjectFile[],
+): boolean {
+  if (allFiles.some((f) => f.folderId === folderId)) return true;
+  return allFolders.some(
+    (f) => f.parentId === folderId && folderHasContent(f.id, allFolders, allFiles),
+  );
+}
+
+/** Hide empty runtime/build placeholders (dist, midnight-level-db, …). */
+function shouldShowFolder(
+  folder: ProjectFolder,
+  allFolders: ProjectFolder[],
+  allFiles: ProjectFile[],
+): boolean {
+  if (!GENERATED_EMPTY_FOLDER_NAMES.has(folder.name)) return true;
+  return folderHasContent(folder.id, allFolders, allFiles);
+}
+
+/** Scaffold / Compact artifact names — renaming breaks Midnight paths & scripts. */
+const LOCKED_FOLDER_NAMES = new Set([
+  "contracts",
+  "src",
+  "managed",
+  "compiler",
+  "keys",
+  "zkir",
+  "contract",
+  "dist",
+  "midnight-level-db",
+  "node_modules",
+]);
+
+const LOCKED_FILE_NAMES = new Set([
+  "package.json",
+  "tsconfig.json",
+  "deployment.json",
+  "providers.ts",
+]);
+
+function folderAncestorNames(
+  folderId: string | null | undefined,
+  allFolders: ProjectFolder[],
+): string[] {
+  const names: string[] = [];
+  let id = folderId ?? null;
+  const byId = new Map(allFolders.map((f) => [f.id, f]));
+  while (id) {
+    const f = byId.get(id);
+    if (!f) break;
+    names.push(f.name);
+    id = f.parentId;
+  }
+  return names;
+}
+
+function isUnderManaged(
+  folderId: string | null | undefined,
+  allFolders: ProjectFolder[],
+): boolean {
+  return folderAncestorNames(folderId, allFolders).some(
+    (n) => n.toLowerCase() === "managed",
+  );
+}
+
+/** Only user-owned `.compact` sources — not managed compiler output. */
+function canRenameFile(
+  file: ProjectFile,
+  allFolders: ProjectFolder[],
+): boolean {
+  if (LOCKED_FILE_NAMES.has(file.name)) return false;
+  if (isUnderManaged(file.folderId, allFolders)) return false;
+  return (
+    file.language === "compact" || file.name.toLowerCase().endsWith(".compact")
+  );
+}
+
+function canRenameFolder(
+  folder: ProjectFolder,
+  allFolders: ProjectFolder[],
+): boolean {
+  if (LOCKED_FOLDER_NAMES.has(folder.name.toLowerCase())) return false;
+  if (isUnderManaged(folder.id, allFolders)) return false;
+  if (isUnderManaged(folder.parentId, allFolders)) return false;
+  // Only allow renaming user-created folders (not scaffold roots / artifact dirs)
+  return true;
 }
 
 // ─── Template tag ──────────────────────────────────────────────────────────────
@@ -107,57 +202,162 @@ function AddFolderForm({ onAdd, onCancel }: { onAdd: (name: string) => void; onC
   );
 }
 
+// ─── Inline rename ─────────────────────────────────────────────────────────────
+
+function InlineRenameInput({
+  initial,
+  onCommit,
+  onCancel,
+  placeholder,
+}: {
+  initial: string;
+  onCommit: (name: string) => void;
+  onCancel: () => void;
+  placeholder?: string;
+}) {
+  const [value, setValue] = useState(initial);
+  const ref = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.focus();
+    const dot = initial.lastIndexOf(".");
+    if (dot > 0) el.setSelectionRange(0, dot);
+    else el.select();
+  }, [initial]);
+
+  const commit = () => {
+    const next = value.trim();
+    if (!next || next === initial) {
+      onCancel();
+      return;
+    }
+    onCommit(next);
+  };
+
+  return (
+    <input
+      ref={ref}
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={commit}
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commit();
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          onCancel();
+        }
+      }}
+      placeholder={placeholder}
+      className="flex-1 min-w-0 bg-white/8 border border-accent/40 rounded px-1.5 py-0.5 text-xs text-text-primary focus:outline-none"
+    />
+  );
+}
+
 // ─── File row ──────────────────────────────────────────────────────────────────
 
 function FileRow({
   file,
   isActive,
   canDelete,
+  canRename = false,
   depth = 0,
   onClick,
   onDelete,
+  onRename,
 }: {
   file: ProjectFile;
   isActive: boolean;
   canDelete: boolean;
+  canRename?: boolean;
   depth?: number;
   onClick: () => void;
   onDelete: () => void;
+  onRename: (name: string) => void;
 }) {
+  const [renaming, setRenaming] = useState(false);
   const pl = 28 + depth * 16;
+
   return (
     <div
-      onClick={onClick}
+      onClick={() => {
+        if (!renaming) onClick();
+      }}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        if (canRename) setRenaming(true);
+      }}
       className={cn(
         "group flex items-center gap-1.5 pr-2 py-1.5 rounded-md cursor-pointer transition-colors",
         isActive ? "bg-white/5" : "hover:bg-white/3",
       )}
       style={{ paddingLeft: pl }}
+      title={canRename ? "Double-click to rename" : undefined}
     >
       <span className="flex-shrink-0 opacity-90">
         <FileIcon filename={file.name} size={14} />
       </span>
-      <span
-        className={cn(
-          "text-xs flex-1 truncate",
-          isActive ? "text-text-primary font-medium" : "text-text-secondary group-hover:text-text-primary",
-        )}
-      >
-        {file.name}
-      </span>
-      {canDelete && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete();
+      {renaming && canRename ? (
+        <InlineRenameInput
+          initial={file.name}
+          onCommit={(name) => {
+            const next = name.trim();
+            // Keep Compact sources as .compact so compile / language stay valid
+            const safe =
+              next.toLowerCase().endsWith(".compact") ? next : `${next.replace(/\.+$/, "")}.compact`;
+            onRename(safe);
+            setRenaming(false);
           }}
-          className="opacity-0 group-hover:opacity-100 w-4 h-4 flex items-center justify-center rounded text-text-dim hover:text-error hover:bg-error/10 transition-all flex-shrink-0"
-          title="Delete file"
+          onCancel={() => setRenaming(false)}
+          placeholder="contract.compact"
+        />
+      ) : (
+        <span
+          className={cn(
+            "text-xs flex-1 truncate",
+            isActive ? "text-text-primary font-medium" : "text-text-secondary group-hover:text-text-primary",
+          )}
         >
-          <svg viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.3" className="w-2.5 h-2.5">
-            <path d="M1 1l6 6M7 1l-6 6" strokeLinecap="round" />
-          </svg>
-        </button>
+          {file.name}
+        </span>
+      )}
+      {!renaming && (
+        <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-all flex-shrink-0">
+          {canRename && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setRenaming(true);
+              }}
+              className="w-4 h-4 flex items-center justify-center rounded text-text-dim hover:text-text-secondary hover:bg-white/6"
+              title="Rename file"
+            >
+              <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.3" className="w-2.5 h-2.5">
+                <path d="M1.5 7.5l5.2-5.2 1.5 1.5L3 9H1.5V7.5z" strokeLinejoin="round" />
+              </svg>
+            </button>
+          )}
+          {canDelete && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              className="w-4 h-4 flex items-center justify-center rounded text-text-dim hover:text-error hover:bg-error/10"
+              title="Delete file"
+            >
+              <svg viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.3" className="w-2.5 h-2.5">
+                <path d="M1 1l6 6M7 1l-6 6" strokeLinecap="round" />
+              </svg>
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
@@ -173,9 +373,12 @@ function FolderNode({
   activeFileId,
   totalFileCount,
   depth,
+  defaultOpen = false,
   onFileClick,
   onDeleteFile,
   onDeleteFolder,
+  onRenameFile,
+  onRenameFolder,
   onAddFile,
   onAddSubfolder,
 }: {
@@ -186,36 +389,77 @@ function FolderNode({
   activeFileId: string | null;
   totalFileCount: number;
   depth: number;
+  /** Only `contracts/` starts open so the default .compact file is visible. */
+  defaultOpen?: boolean;
   onFileClick: (fileId: string) => void;
   onDeleteFile: (fileId: string) => void;
   onDeleteFolder: (folderId: string) => void;
+  onRenameFile: (fileId: string, name: string) => void;
+  onRenameFolder: (folderId: string, name: string) => void;
   onAddFile: (name: string, folderId: string) => void;
   onAddSubfolder: (name: string, parentId: string) => void;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(!defaultOpen);
   const [nodeAdding, setNodeAdding] = useState<"none" | "file" | "subfolder">("none");
+  const [renaming, setRenaming] = useState(false);
 
-  const directFiles = allFiles.filter((f) => f.folderId === folder.id);
-  const subFolders = allFolders.filter((f) => f.parentId === folder.id);
+  const directFiles = allFiles
+    .filter((f) => f.folderId === folder.id)
+    .slice()
+    .sort(byNameAsc);
+  const subFolders = allFolders
+    .filter((f) => f.parentId === folder.id)
+    .filter((f) => shouldShowFolder(f, allFolders, allFiles))
+    .slice()
+    .sort(byNameAsc);
+
+  // Under contracts/: *.compact first, then managed/ (collapsed).
+  const contractsLayout = folder.name === "contracts";
 
   const folderPl = 24 + depth * 16;
   const contentPl = folderPl + 16;
   const folderColor = getFolderColor(folder.name);
+  const isManagedTree = /^(managed|compiler|contract|keys|zkir)$/i.test(folder.name);
+  const isEmpty = directFiles.length === 0 && subFolders.length === 0 && nodeAdding === "none";
+  const folderRenamable = canRenameFolder(folder, allFolders);
 
   function openAndAdd(kind: "file" | "subfolder") {
     setCollapsed(false);
     setNodeAdding(kind);
   }
 
+  const sharedFolderProps = {
+    allFolders,
+    allFiles,
+    isActive,
+    activeFileId,
+    totalFileCount,
+    depth: depth + 1,
+    defaultOpen: false as const,
+    onFileClick,
+    onDeleteFile,
+    onDeleteFolder,
+    onRenameFile,
+    onRenameFolder,
+    onAddFile,
+    onAddSubfolder,
+  };
+
   return (
     <div>
       {/* Folder header */}
       <div
-        className="group flex items-center gap-1.5 pr-2 py-1 rounded-md hover:bg-white/3 cursor-pointer transition-colors"
+        className="group flex items-center gap-1.5 pr-2 py-1 rounded-md hover:bg-white/[0.04] cursor-pointer transition-colors"
         style={{ paddingLeft: folderPl }}
-        onClick={() => setCollapsed((c) => !c)}
+        onClick={() => {
+          if (!renaming) setCollapsed((c) => !c);
+        }}
+        onDoubleClick={(e) => {
+          e.stopPropagation();
+          if (folderRenamable) setRenaming(true);
+        }}
+        title={folderRenamable ? "Double-click to rename" : undefined}
       >
-        {/* Chevron */}
         <svg
           viewBox="0 0 6 6"
           fill="currentColor"
@@ -227,80 +471,133 @@ function FolderNode({
           <path d="M1 0.5l4 2.5-4 2.5V0.5z" />
         </svg>
 
-        {/* Material folder icon */}
         <span className="flex-shrink-0">
           <FolderIcon open={!collapsed} size={15} color={folderColor} />
         </span>
 
-        <span className="text-xs text-text-secondary flex-1 truncate min-w-0">{folder.name}</span>
+        {renaming && folderRenamable ? (
+          <InlineRenameInput
+            initial={folder.name}
+            onCommit={(name) => {
+              onRenameFolder(folder.id, name);
+              setRenaming(false);
+            }}
+            onCancel={() => setRenaming(false)}
+            placeholder="folder-name"
+          />
+        ) : (
+          <span
+            className={cn(
+              "text-xs flex-1 truncate min-w-0",
+              isManagedTree ? "text-text-muted font-medium" : "text-text-secondary",
+            )}
+          >
+            {folder.name}
+          </span>
+        )}
+        {isEmpty && !renaming && (
+          <span className="text-2xs text-text-dim opacity-0 group-hover:opacity-100 transition-opacity">
+            empty
+          </span>
+        )}
 
-        {/* Hover actions */}
-        <div
-          className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <button
-            onClick={() => openAndAdd("file")}
-            className="w-4 h-4 flex items-center justify-center rounded text-text-dim hover:text-text-secondary hover:bg-white/6 transition-colors"
-            title="New file"
+        {!renaming && (
+          <div
+            className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+            onClick={(e) => e.stopPropagation()}
           >
-            <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.4" className="w-2 h-2">
-              <path d="M5 1v8M1 5h8" strokeLinecap="round" />
-            </svg>
-          </button>
-          <button
-            onClick={() => openAndAdd("subfolder")}
-            className="w-4 h-4 flex items-center justify-center rounded text-text-dim hover:text-[#DCB67A] hover:bg-[#DCB67A]/10 transition-colors"
-            title="New sub-folder"
-          >
-            <svg viewBox="0 0 12 10" fill="none" stroke="currentColor" strokeWidth="1.2" className="w-3 h-2.5">
-              <path d="M1 2h3.5l1 1H11v6H1V2z" strokeLinejoin="round" />
-              <path d="M6 5.5v2M5 6.5h2" strokeLinecap="round" />
-            </svg>
-          </button>
-          <button
-            onClick={() => onDeleteFolder(folder.id)}
-            className="w-4 h-4 flex items-center justify-center rounded text-text-dim hover:text-error hover:bg-error/10 transition-colors"
-            title="Delete folder"
-          >
-            <svg viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.3" className="w-2.5 h-2.5">
-              <path d="M1 1l6 6M7 1l-6 6" strokeLinecap="round" />
-            </svg>
-          </button>
-        </div>
+            {folderRenamable && (
+              <button
+                onClick={() => setRenaming(true)}
+                className="w-4 h-4 flex items-center justify-center rounded text-text-dim hover:text-text-secondary hover:bg-white/6 transition-colors"
+                title="Rename folder"
+              >
+                <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.3" className="w-2.5 h-2.5">
+                  <path d="M1.5 7.5l5.2-5.2 1.5 1.5L3 9H1.5V7.5z" strokeLinejoin="round" />
+                </svg>
+              </button>
+            )}
+            <button
+              onClick={() => openAndAdd("file")}
+              className="w-4 h-4 flex items-center justify-center rounded text-text-dim hover:text-text-secondary hover:bg-white/6 transition-colors"
+              title="New file"
+            >
+              <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.4" className="w-2 h-2">
+                <path d="M5 1v8M1 5h8" strokeLinecap="round" />
+              </svg>
+            </button>
+            <button
+              onClick={() => openAndAdd("subfolder")}
+              className="w-4 h-4 flex items-center justify-center rounded text-text-dim hover:text-[#DCB67A] hover:bg-[#DCB67A]/10 transition-colors"
+              title="New sub-folder"
+            >
+              <svg viewBox="0 0 12 10" fill="none" stroke="currentColor" strokeWidth="1.2" className="w-3 h-2.5">
+                <path d="M1 2h3.5l1 1H11v6H1V2z" strokeLinejoin="round" />
+                <path d="M6 5.5v2M5 6.5h2" strokeLinecap="round" />
+              </svg>
+            </button>
+            <button
+              onClick={() => onDeleteFolder(folder.id)}
+              className="w-4 h-4 flex items-center justify-center rounded text-text-dim hover:text-error hover:bg-error/10 transition-colors"
+              title="Delete folder"
+            >
+              <svg viewBox="0 0 8 8" fill="none" stroke="currentColor" strokeWidth="1.3" className="w-2.5 h-2.5">
+                <path d="M1 1l6 6M7 1l-6 6" strokeLinecap="round" />
+              </svg>
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Contents */}
       {!collapsed && (
         <div>
-          {directFiles.map((file) => (
-            <FileRow
-              key={file.id}
-              file={file}
-              isActive={isActive && file.id === activeFileId}
-              canDelete={totalFileCount > 1}
-              depth={depth + 1}
-              onClick={() => onFileClick(file.id)}
-              onDelete={() => onDeleteFile(file.id)}
-            />
-          ))}
-          {subFolders.map((sub) => (
-            <FolderNode
-              key={sub.id}
-              folder={sub}
-              allFolders={allFolders}
-              allFiles={allFiles}
-              isActive={isActive}
-              activeFileId={activeFileId}
-              totalFileCount={totalFileCount}
-              depth={depth + 1}
-              onFileClick={onFileClick}
-              onDeleteFile={onDeleteFile}
-              onDeleteFolder={onDeleteFolder}
-              onAddFile={onAddFile}
-              onAddSubfolder={onAddSubfolder}
-            />
-          ))}
+          {contractsLayout ? (
+            <>
+              {directFiles.map((file) => (
+                <FileRow
+                  key={file.id}
+                  file={file}
+                  isActive={isActive && file.id === activeFileId}
+                  canDelete={
+                    totalFileCount > 1 &&
+                    !LOCKED_FILE_NAMES.has(file.name) &&
+                    !isUnderManaged(file.folderId, allFolders)
+                  }
+                  canRename={canRenameFile(file, allFolders)}
+                  depth={depth + 1}
+                  onClick={() => onFileClick(file.id)}
+                  onDelete={() => onDeleteFile(file.id)}
+                  onRename={(name) => onRenameFile(file.id, name)}
+                />
+              ))}
+              {subFolders.map((sub) => (
+                <FolderNode key={sub.id} folder={sub} {...sharedFolderProps} />
+              ))}
+            </>
+          ) : (
+            <>
+              {subFolders.map((sub) => (
+                <FolderNode key={sub.id} folder={sub} {...sharedFolderProps} />
+              ))}
+              {directFiles.map((file) => (
+                <FileRow
+                  key={file.id}
+                  file={file}
+                  isActive={isActive && file.id === activeFileId}
+                  canDelete={
+                    totalFileCount > 1 &&
+                    !LOCKED_FILE_NAMES.has(file.name) &&
+                    !isUnderManaged(file.folderId, allFolders)
+                  }
+                  canRename={canRenameFile(file, allFolders)}
+                  depth={depth + 1}
+                  onClick={() => onFileClick(file.id)}
+                  onDelete={() => onDeleteFile(file.id)}
+                  onRename={(name) => onRenameFile(file.id, name)}
+                />
+              ))}
+            </>
+          )}
           {nodeAdding === "file" && (
             <div style={{ paddingLeft: contentPl }}>
               <AddFileForm
@@ -340,6 +637,8 @@ function ProjectFolderItem({
   onAddFolder,
   onDeleteFile,
   onDeleteFolder,
+  onRenameFile,
+  onRenameFolder,
 }: {
   project: Project;
   isActive: boolean;
@@ -353,21 +652,30 @@ function ProjectFolderItem({
   onAddFolder: (name: string, parentId: string | null) => void;
   onDeleteFile: (id: string) => void;
   onDeleteFolder: (id: string) => void;
+  onRenameFile: (fileId: string, name: string) => void;
+  onRenameFolder: (folderId: string, name: string) => void;
 }) {
   const [rootAdding, setRootAdding] = useState<RootAddingState>({ type: "none" });
 
   const allFolders = project.folders ?? [];
   const allFiles = project.files;
-  const rootFolders = allFolders.filter((f) => !f.parentId);
-  const rootFiles = allFiles.filter((f) => !f.folderId);
+  const rootFolders = allFolders
+    .filter((f) => !f.parentId)
+    .filter((f) => shouldShowFolder(f, allFolders, allFiles))
+    .slice()
+    .sort(byNameAsc);
+  const rootFiles = allFiles
+    .filter((f) => !f.folderId)
+    .slice()
+    .sort(byNameAsc);
 
   return (
-    <div>
+    <div className="mb-0.5">
       {/* Project header */}
       <div
         className={cn(
           "group flex items-center gap-1 px-2 py-1.5 rounded-md cursor-pointer transition-colors",
-          isActive ? "bg-white/4" : "hover:bg-white/3",
+          isActive ? "bg-white/[0.05] ring-1 ring-white/[0.04]" : "hover:bg-white/[0.03]",
         )}
       >
         {/* Expand chevron */}
@@ -395,6 +703,14 @@ function ProjectFolderItem({
           >
             {project.name}
           </span>
+          {project.deployResult?.contractAddress && (
+            <span
+              className="text-2xs px-1 py-0.5 rounded bg-success/10 text-success flex-shrink-0"
+              title={project.deployResult.contractAddress}
+            >
+              deployed
+            </span>
+          )}
         </div>
 
         {!isExpanded && (
@@ -438,20 +754,9 @@ function ProjectFolderItem({
         </div>
       </div>
 
-      {/* Expanded tree */}
+      {/* Expanded tree — folders first, then files (VS Code / Cursor default) */}
       {isExpanded && (
-        <div className="mb-1">
-          {rootFiles.map((file) => (
-            <FileRow
-              key={file.id}
-              file={file}
-              isActive={isActive && file.id === activeFileId}
-              canDelete={allFiles.length > 1}
-              depth={0}
-              onClick={() => { if (!isActive) onLoadProject(); onSetActiveFile(file.id); }}
-              onDelete={() => onDeleteFile(file.id)}
-            />
-          ))}
+        <div className="mb-1.5 ml-1 border-l border-border/60 pl-0.5">
           {rootFolders.map((folder) => (
             <FolderNode
               key={folder.id}
@@ -462,11 +767,31 @@ function ProjectFolderItem({
               activeFileId={activeFileId}
               totalFileCount={allFiles.length}
               depth={0}
+              defaultOpen={folder.name === "contracts"}
               onFileClick={(fileId) => { if (!isActive) onLoadProject(); onSetActiveFile(fileId); }}
               onDeleteFile={(fileId) => onDeleteFile(fileId)}
               onDeleteFolder={(folderId) => onDeleteFolder(folderId)}
+              onRenameFile={onRenameFile}
+              onRenameFolder={onRenameFolder}
               onAddFile={(name, folderId) => onAddFile(name, folderId)}
               onAddSubfolder={(name, parentId) => onAddFolder(name, parentId)}
+            />
+          ))}
+          {rootFiles.map((file) => (
+            <FileRow
+              key={file.id}
+              file={file}
+              isActive={isActive && file.id === activeFileId}
+              canDelete={
+                allFiles.length > 1 &&
+                !LOCKED_FILE_NAMES.has(file.name) &&
+                !isUnderManaged(file.folderId, allFolders)
+              }
+              canRename={canRenameFile(file, allFolders)}
+              depth={0}
+              onClick={() => { if (!isActive) onLoadProject(); onSetActiveFile(file.id); }}
+              onDelete={() => onDeleteFile(file.id)}
+              onRename={(name) => onRenameFile(file.id, name)}
             />
           ))}
           {rootAdding.type === "file" && (
@@ -486,7 +811,7 @@ function ProjectFolderItem({
             </div>
           )}
           {rootAdding.type === "none" && (
-            <div className="mx-2 mt-1 flex items-center gap-3">
+            <div className="mx-2 mt-1 mb-0.5 flex items-center gap-3">
               <button
                 onClick={() => setRootAdding({ type: "file" })}
                 className="flex items-center gap-1 py-0.5 text-2xs text-text-dim hover:text-text-muted transition-colors"
@@ -533,9 +858,24 @@ export function Sidebar() {
     deleteProject,
     addFolder,
     deleteFolder,
+    renameFile,
+    renameFolder,
     setNewProjectModalOpen,
     createProject,
+    sidebarRevealFolderIds,
+    clearSidebarReveal,
   } = useIDEStore();
+
+  useEffect(() => {
+    if (!sidebarRevealFolderIds.length) return;
+    setOpenedByUser((prev) => new Set([...prev, ...sidebarRevealFolderIds]));
+    setClosedByUser((prev) => {
+      const n = new Set(prev);
+      for (const id of sidebarRevealFolderIds) n.delete(id);
+      return n;
+    });
+    clearSidebarReveal();
+  }, [sidebarRevealFolderIds, clearSidebarReveal]);
 
   function isExpanded(id: string): boolean {
     if (closedByUser.has(id)) return false;
@@ -569,6 +909,16 @@ export function Sidebar() {
   function handleAddFolder(projectId: string, name: string, parentId: string | null) {
     if (projectId !== activeProjectId) loadProject(projectId);
     addFolder(name, parentId);
+  }
+
+  function handleRenameFile(projectId: string, fileId: string, name: string) {
+    if (projectId !== activeProjectId) loadProject(projectId);
+    renameFile(fileId, name);
+  }
+
+  function handleRenameFolder(projectId: string, folderId: string, name: string) {
+    if (projectId !== activeProjectId) loadProject(projectId);
+    renameFolder(folderId, name);
   }
 
   const templates = Object.entries(COMPACT_TEMPLATES)
@@ -627,11 +977,24 @@ export function Sidebar() {
                 >
                   <FolderIcon size={22} color="#636360" />
                 </div>
-                <p className="text-sm text-text-muted">No projects yet</p>
-                <p className="text-xs text-text-dim mt-1 mb-3">Create your first Compact contract</p>
-                <button onClick={() => setNewProjectModalOpen(true, "blank")} className="text-xs text-accent hover:underline">
-                  + New project
-                </button>
+                <p className="text-sm text-text-muted">0 projects</p>
+                <p className="text-xs text-text-dim mt-1 mb-3 leading-relaxed">
+                  Create Hello World (bundled keys) or any template. Flow: Compile then Deploy with 1AM.
+                </p>
+                <div className="flex flex-col items-center gap-2">
+                  <button
+                    onClick={() => setNewProjectModalOpen(true, "blank")}
+                    className="text-xs text-accent hover:underline"
+                  >
+                    + New project
+                  </button>
+                  <button
+                    onClick={() => setTab("templates")}
+                    className="text-xs text-text-secondary hover:text-text-primary hover:underline"
+                  >
+                    Browse templates
+                  </button>
+                </div>
               </div>
             )}
             {projects.map((project) => (
@@ -649,6 +1012,8 @@ export function Sidebar() {
                 onAddFolder={(name, parentId) => handleAddFolder(project.id, name, parentId)}
                 onDeleteFile={(fid) => deleteFile(fid)}
                 onDeleteFolder={(fid) => deleteFolder(fid)}
+                onRenameFile={(fid, name) => handleRenameFile(project.id, fid, name)}
+                onRenameFolder={(fid, name) => handleRenameFolder(project.id, fid, name)}
               />
             ))}
           </div>
@@ -682,7 +1047,7 @@ export function Sidebar() {
                       deployable ? "text-success bg-success/10" : "text-warning bg-warning/10",
                     )}
                   >
-                    {deployable ? "Instant deploy" : "Needs Compile"}
+                    {deployable ? "Bundled keys" : "Compile then Deploy"}
                   </span>
                 </div>
               </button>

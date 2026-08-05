@@ -1,6 +1,8 @@
 /**
- * Deploy readiness: bundled templates only when source matches the template;
- * otherwise require a full ZK Compile whose source hash still matches.
+ * Deploy readiness:
+ * - Hello World / Counter (unedited): bundled Preprod assets → Deploy without Compile
+ * - Everything else: full ZK Compile first, then Deploy
+ * - Never compiled (and not bundled Instant Deploy) → Deploy disabled
  */
 
 import { COMPACT_TEMPLATES } from "@/lib/constants";
@@ -48,6 +50,8 @@ export type DeployGate = {
   canDeploy: boolean;
   needsCompile: boolean;
   usingBundled: boolean;
+  /** True when this project has a successful full ZK compile for the current source. */
+  hasCompiled: boolean;
   reason: string;
 };
 
@@ -58,6 +62,10 @@ export function getDeployGate(options: {
   currentSource: string;
 }): DeployGate {
   const hash = fingerprintSource(options.currentSource || "");
+  const hasMatchingCompile =
+    !!options.artifactBaseUrl &&
+    !!options.compiledSourceHash &&
+    options.compiledSourceHash === hash;
 
   if (options.artifactBaseUrl) {
     if (!options.compiledSourceHash || options.compiledSourceHash !== hash) {
@@ -65,16 +73,18 @@ export function getDeployGate(options: {
         canDeploy: false,
         needsCompile: true,
         usingBundled: false,
+        hasCompiled: false,
         reason: options.compiledSourceHash
-          ? "Source changed since last Compile. Run Compile before Deploy."
-          : "Compiled artifacts are missing a source fingerprint. Run Compile again before Deploy.",
+          ? "Source changed since last Compile. Run Compile, then Deploy."
+          : "This project has never been compiled for the current source. Run Compile, then Deploy.",
       };
     }
     return {
       canDeploy: true,
       needsCompile: false,
       usingBundled: false,
-      reason: "Deploy using your compiled ZK artifacts",
+      hasCompiled: true,
+      reason: "Compiled. Deploy with 1AM on Preprod.",
     };
   }
 
@@ -85,14 +95,18 @@ export function getDeployGate(options: {
         canDeploy: false,
         needsCompile: true,
         usingBundled: false,
-        reason: "You edited the contract. Run Compile before Deploy (bundled assets no longer match).",
+        hasCompiled: false,
+        reason:
+          "You edited the contract. Run Compile, then Deploy (bundled keys no longer match).",
       };
     }
     return {
       canDeploy: true,
       needsCompile: false,
       usingBundled: true,
-      reason: "Deploy using bundled Preprod assets (unedited template)",
+      hasCompiled: hasMatchingCompile,
+      reason:
+        "Bundled Preprod keys ready (Hello/Counter). Optional: Compile your own keys, then Deploy.",
     };
   }
 
@@ -100,7 +114,8 @@ export function getDeployGate(options: {
     canDeploy: false,
     needsCompile: true,
     usingBundled: false,
-    reason: "Run Compile to produce ZK keys, then Deploy.",
+    hasCompiled: false,
+    reason: "This project has never been compiled. Run Compile, then Deploy.",
   };
 }
 
@@ -113,13 +128,13 @@ export function deployStatusLabel(options: {
 }): { label: string; tone: "success" | "warn" | "muted" } {
   const gate = getDeployGate(options);
   if (gate.canDeploy && gate.usingBundled) {
-    return { label: "Ready to deploy", tone: "success" };
+    return { label: "Bundled · Deploy ready", tone: "success" };
   }
   if (gate.canDeploy) {
-    return { label: "Compiled · ready", tone: "success" };
+    return { label: "Compiled · Deploy ready", tone: "success" };
   }
   if (gate.needsCompile) {
-    return { label: "Needs Compile", tone: "warn" };
+    return { label: "Compile then Deploy", tone: "warn" };
   }
-  return { label: "Compile only", tone: "muted" };
+  return { label: "Compile required", tone: "muted" };
 }
