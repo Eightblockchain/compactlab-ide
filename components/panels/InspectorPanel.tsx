@@ -19,30 +19,39 @@ import {
   validateWitnessValues,
   witnessFieldKind,
 } from "@/lib/playground-witnesses";
+import { LearnPanel } from "@/components/panels/LearnPanel";
+import { ZkArtifactsPanel } from "@/components/panels/ZkArtifactsPanel";
 
 export function InspectorPanel() {
   const { rightPanelTab, setRightPanelTab } = useIDEStore();
 
-  const tabs = [
+  const mainTabs = [
     { id: "contract-ui", label: "Contract UI" },
     { id: "source-scan", label: "Source" },
   ];
+  const learnTab = [{ id: "learn", label: "Learn" }];
 
   return (
     <div className="flex flex-col h-full bg-surface border-l border-border overflow-hidden">
-      <div className="flex-shrink-0 border-b border-border">
+      <div className="flex-shrink-0 border-b border-border flex items-center justify-between px-1">
         <Tabs
-          tabs={tabs}
+          tabs={mainTabs}
           activeTab={rightPanelTab}
           onTabChange={(id) => setRightPanelTab(id as PanelTab)}
           size="sm"
-          className="px-1"
+        />
+        <Tabs
+          tabs={learnTab}
+          activeTab={rightPanelTab}
+          onTabChange={(id) => setRightPanelTab(id as PanelTab)}
+          size="sm"
         />
       </div>
 
       <div className="flex-1 overflow-y-auto">
         {rightPanelTab === "contract-ui" && <ContractUITab />}
         {rightPanelTab === "source-scan" && <SourceScanTab />}
+        {rightPanelTab === "learn" && <LearnPanel />}
       </div>
     </div>
   );
@@ -216,12 +225,12 @@ function ContractUITab() {
       setStateLoading(true);
       setStateError(null);
       try {
-        const res = await fetch("/api/indexer", {
+        const { apiFetch } = await import("@/lib/api");
+        const res = await apiFetch("/v1/indexer", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+          json: {
             query: `{ contractAction(address: "${addr}") { address state transaction { hash block { height } } } }`,
-          }),
+          },
         });
         const json = (await res.json()) as IndexerResponse;
         const action = json.data?.contractAction;
@@ -326,7 +335,7 @@ function ContractUITab() {
           level: "error",
           message:
             callBlockedReason ??
-            "On-chain call requires deployable artifacts, a contract address, a connected Midnight wallet, and any private witnesses filled in.",
+            "On-chain call requires deployable artifacts, a contract address, connected 1AM, and any private witnesses filled in.",
           source: "network",
         });
         setCircuitResults((prev) => ({
@@ -411,7 +420,7 @@ function ContractUITab() {
               ? suggestedCircuit
                 ? `Next: scroll to Interact and click Call ${suggestedCircuit.name}(). Proofs take 1-2 minutes; approve the fee in your wallet when prompted.`
                 : "Next: call a circuit below. Proofs take 1-2 minutes."
-              : "Connect a Midnight wallet (toolbar or button below), then call a circuit."}
+              : "Connect 1AM (toolbar Connect 1AM or button below), then call a circuit."}
           </p>
           <div className="flex flex-wrap gap-2 pt-0.5">
             {deployResult?.contractAddress && (
@@ -439,6 +448,37 @@ function ContractUITab() {
       <div>
         <SectionLabel text="Active Contract" />
         <div className="space-y-2">
+          {deployResult?.contractAddress && (
+            <div className="rounded-md border border-border/80 bg-white/[0.02] px-2.5 py-2 space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-2xs uppercase tracking-wide text-text-muted">Saved deploy</p>
+                <span className="text-2xs text-text-dim">Redeploy overwrites</span>
+              </div>
+              <a
+                href={oneAmContractUrl(deployResult.contractAddress)}
+                target="_blank"
+                rel="noreferrer"
+                className="block text-xs font-mono text-accent hover:underline truncate"
+                title={deployResult.contractAddress}
+              >
+                {deployResult.contractAddress}
+              </a>
+              {addressInput.trim() !== deployResult.contractAddress && (
+                <button
+                  type="button"
+                  className="text-2xs text-text-secondary hover:text-text-primary hover:underline"
+                  onClick={() => {
+                    setAddressInput(deployResult.contractAddress!);
+                    setActiveAddress(deployResult.contractAddress!);
+                    setContractInfo(null);
+                    setStateError(null);
+                  }}
+                >
+                  Use saved address
+                </button>
+              )}
+            </div>
+          )}
           <div className="flex gap-1.5">
             <input
               type="text"
@@ -455,6 +495,19 @@ function ContractUITab() {
               {activeAddress && addressInput.trim() === activeAddress ? "↻" : "Load"}
             </Button>
           </div>
+          {addressInput.trim() &&
+            addressInput.trim() !== (deployResult?.contractAddress ?? "") && (
+              <button
+                type="button"
+                className="text-2xs text-accent hover:underline"
+                onClick={() => {
+                  useIDEStore.getState().saveContractAddress(addressInput.trim());
+                  setActiveAddress(addressInput.trim());
+                }}
+              >
+                Save as project contract address
+              </button>
+            )}
 
           {activeAddress ? (
             <div className="flex items-center gap-2 flex-wrap">
@@ -482,11 +535,18 @@ function ContractUITab() {
             </div>
           ) : (
             <p className="text-2xs text-text-dim leading-relaxed">
-              Click <span className="text-text-secondary">Deploy</span> in the toolbar for Hello Midnight
+              Click <span className="text-text-secondary">Compile</span> then{" "}
+              <span className="text-text-secondary">Deploy</span> in the toolbar
+              (Hello/Counter can Deploy with bundled keys if unedited). Use{" "}
+              <span className="text-text-secondary">Connect 1AM</span> first.
               or Counter. The address appears here automatically.
             </p>
           )}
         </div>
+      </div>
+
+      <div>
+        <ZkArtifactsPanel />
       </div>
 
       {witnesses.length > 0 && (
@@ -499,7 +559,7 @@ function ContractUITab() {
           </div>
           <p className="mb-2 text-2xs text-text-muted leading-relaxed">
             Auto-detected from this project&apos;s Compact source. Needed when you Call circuits that
-            read them (e.g. post / takeDown) — not required to Deploy. Keep the same values across
+            read them (e.g. post / takeDown) - not required to Deploy. Keep the same values across
             related calls.
           </p>
           <div className="space-y-2">
@@ -631,7 +691,7 @@ function ContractUITab() {
         )}
 
         {circuits.length === 0 ? (
-          <EmptyState message="No circuits found. Open Hello Midnight or run Check syntax / Compile." />
+          <EmptyState message="No circuits found. Open Hello World or run Typecheck / Compile." />
         ) : (
           <div className="space-y-3">
             {circuits.map((circuit) => (
