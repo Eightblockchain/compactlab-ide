@@ -1,15 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Group as PanelGroup,
   Panel,
   Separator as PanelResizeHandle,
 } from "react-resizable-panels";
 import { useIDEStore } from "@/store/ide";
+import { useAuth } from "@/hooks/useAuth";
 import { Topbar } from "@/components/layout/Topbar";
 import { OnboardingStrip } from "@/components/layout/OnboardingStrip";
 import { PublicModeBanner } from "@/components/layout/PublicModeBanner";
+import { WorkspaceNoticeBanner } from "@/components/layout/WorkspaceNoticeBanner";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { CompactEditor } from "@/components/editor/CompactEditor";
 import { InspectorPanel } from "@/components/panels/InspectorPanel";
@@ -17,19 +20,43 @@ import { BottomPanel } from "@/components/panels/BottomPanel";
 import { NewProjectModal } from "@/components/modals/NewProjectModal";
 
 export default function PlaygroundPage() {
-  const { activeProjectId, projects, loadProject, sidebarOpen, bottomPanelOpen } = useIDEStore();
-  // Guard against Zustand persist hydration mismatch (localStorage vs SSR)
+  const {
+    activeProjectId,
+    projects,
+    loadProject,
+    sidebarOpen,
+    bottomPanelOpen,
+    hydrateProjectsFromCloud,
+    projectsHydrated,
+    clearWorkspace,
+  } = useIDEStore();
+  const { user, loading: authLoading } = useAuth();
+  const router = useRouter();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
     setMounted(true);
-    if (!activeProjectId && projects.length > 0) {
-      loadProject(projects[0].id);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!mounted) {
+  useEffect(() => {
+    if (mounted && !authLoading && !user) {
+      clearWorkspace();
+      router.replace("/login");
+    }
+  }, [mounted, authLoading, user, router, clearWorkspace]);
+
+  useEffect(() => {
+    if (!mounted || authLoading || !user) return;
+    void hydrateProjectsFromCloud();
+  }, [mounted, authLoading, user, hydrateProjectsFromCloud]);
+
+  useEffect(() => {
+    if (projectsHydrated && !activeProjectId && projects.length > 0) {
+      loadProject(projects[0]!.id);
+    }
+  }, [projectsHydrated, activeProjectId, projects, loadProject]);
+
+  if (!mounted || authLoading || !user || !projectsHydrated) {
     return (
       <div
         style={{
@@ -64,6 +91,7 @@ export default function PlaygroundPage() {
     <div className="flex flex-col h-screen overflow-hidden bg-surface">
       <Topbar />
       <PublicModeBanner />
+      <WorkspaceNoticeBanner />
       <OnboardingStrip />
 
       {/* Main IDE body — flex-1 + min-h-0 are critical for nested panels */}

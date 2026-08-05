@@ -1,14 +1,24 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { generateId, slugify } from "@/lib/utils";
-import { COMPACT_TEMPLATES, SAMPLE_PROJECTS, PROJECT_BASE_FOLDERS, PROJECT_TSCONFIG, PROJECT_PROVIDERS_TS, PROJECT_DEPLOYMENT_JSON, buildPackageJson } from "@/lib/constants";
+import { COMPACT_TEMPLATES, PROJECT_BASE_FOLDERS, PROJECT_TSCONFIG, PROJECT_PROVIDERS_TS, PROJECT_DEPLOYMENT_JSON, buildPackageJson } from "@/lib/constants";
 import { COMPACT_STABLE_VERSION } from "@/lib/version";
 import type { CompactVersion } from "@/lib/version";
 import type { CompileResult, SimulateResult, DeployResult, LogEntry } from "@/lib/compact";
 import { fingerprintSource } from "@/lib/deploy-gate";
+import {
+  createCloudProject,
+  deleteCloudProject,
+  fetchCloudProjects,
+  scheduleProjectSync,
+  setProjectSyncEnabled,
+  setProjectSyncErrorHandler,
+  syncProjectNow,
+} from "@/lib/project-sync";
+import { makeLog } from "@/lib/compact";
 
 export type IDEStatus = "idle" | "compiling" | "simulating" | "deploying" | "saving";
-export type PanelTab = "contract-ui" | "source-scan";
+export type PanelTab = "contract-ui" | "source-scan" | "learn";
 export type LogTab = "logs" | "compile" | "network";
 
 // ─── Domain types ──────────────────────────────────────────────────────────────
@@ -55,7 +65,10 @@ export interface Project {
 export interface WalletState {
   connected: boolean;
   address: string | null;
+  /** Formatted tDUST balance from 1AM getDustBalance(), or null if unknown. */
   balance: string | null;
+  /** Max tDUST generable from current tNIGHT (cap), if reported. */
+  dustCap: string | null;
   network: string;
 }
 
@@ -104,10 +117,18 @@ export interface IDEStore {
   isNewProjectModalOpen: boolean;
   newProjectModalTemplate: string;
 
+  // Cloud sync
+  projectsHydrated: boolean;
+  projectsSyncing: boolean;
+  /** User-visible cloud sync / save error (banner). */
+  workspaceNotice: string | null;
+
   // Open editor tabs (file IDs, current project)
   openTabIds: string[];
   // In-memory buffers for unsaved content per file (not persisted)
   tabBuffers: Record<string, string>;
+  /** Folder IDs to expand in the sidebar after Compile mirrors managed/. */
+  sidebarRevealFolderIds: string[];
 
   // Actions — projects
   createProject: (name: string, template?: string, description?: string) => Project;
@@ -121,10 +142,17 @@ export interface IDEStore {
   addFolder: (name: string, parentId?: string | null) => ProjectFolder | null;
   deleteFolder: (folderId: string) => void;
   renameFolder: (folderId: string, name: string) => void;
+  renameFile: (fileId: string, name: string) => void;
   setCode: (code: string) => void;
   saveProject: () => void;
   deleteProject: (id: string) => void;
   renameProject: (id: string, name: string) => void;
+  /** Load the authenticated user's projects from the API (source of truth). */
+  hydrateProjectsFromCloud: () => Promise<void>;
+  /** Persist a manually entered contract address as the project's saved deploy. */
+  saveContractAddress: (address: string) => void;
+  clearWorkspace: () => void;
+  setWorkspaceNotice: (notice: string | null) => void;
 
   // Actions — IDE
   setStatus: (status: IDEStatus) => void;
@@ -150,6 +178,7 @@ export interface IDEStore {
   setSidebarOpen: (open: boolean) => void;
   setNewProjectModalOpen: (open: boolean, template?: string) => void;
   setCompactVersion: (_version?: CompactVersion) => void;
+  clearSidebarReveal: () => void;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -168,8 +197,8 @@ function buildProject(
 
   // ── Folders ───────────────────────────────────────────────────────────────
   // Merge template-specific folders with the shared base folders.
-  // Base provides: contracts/, src/, generated/.
-  // Template may add more (e.g. test/, scripts/).
+  // Base provides: contracts/, src/ (Midnight getting-started layout).
+  // Template may add more. Compile mirrors into contracts/managed/<slug>/.
   const allTemplateFolders = [...PROJECT_BASE_FOLDERS, ...(tpl.folders ?? [])];
   const folderMap = new Map<string, ProjectFolder>();
   for (const tf of allTemplateFolders) {
@@ -228,23 +257,7 @@ function buildProject(
   };
 }
 
-const INITIAL_PROJECTS: Project[] = SAMPLE_PROJECTS.map((p) =>
-  buildProject(
-    p.id,
-    p.name,
-    p.template,
-    p.description,
-    p.updatedAt - 1000 * 60 * 60,
-    p.updatedAt
-  )
-);
-
-const firstProject = INITIAL_PROJECTS[0] ?? null;
-const firstFile = firstProject
-  ? (firstProject.files.find((f) => f.id === firstProject.activeFileId) ??
-      firstProject.files[0] ??
-      null)
-  : null;
+const INITIAL_PROJECTS: Project[] = [];
 
 // ─── Store ────────────────────────────────────────────────────────────────────
 
@@ -253,12 +266,12 @@ export const useIDEStore = create<IDEStore>()(
     (set, get) => ({
       // ── Initial state ──────────────────────────────────────────────────────
       projects: INITIAL_PROJECTS,
-      activeProjectId: firstProject?.id ?? null,
-      activeProject: firstProject,
-      activeFileId: firstFile?.id ?? null,
-      activeFile: firstFile,
+      activeProjectId: null,
+      activeProject: null,
+      activeFileId: null,
+      activeFile: null,
 
-      code: firstFile?.content ?? "",
+      code: "",
       isDirty: false,
       saveStatus: "saved",
 
@@ -269,6 +282,7 @@ export const useIDEStore = create<IDEStore>()(
         connected: false,
         address: null,
         balance: null,
+        dustCap: null,
         network: "Midnight Preprod",
       },
 
@@ -277,7 +291,7 @@ export const useIDEStore = create<IDEStore>()(
       simulateInputs: {},
       activeCircuit: null,
       deployResult: null,
-      witnessValues: firstProject?.witnessValues ?? {},
+      witnessValues: {},
 
       logs: [],
       rightPanelTab: "contract-ui",
@@ -289,8 +303,13 @@ export const useIDEStore = create<IDEStore>()(
       newProjectModalTemplate: "blank",
       compactVersion: COMPACT_STABLE_VERSION,
 
-      openTabIds: firstFile ? [firstFile.id] : [],
+      projectsHydrated: false,
+      projectsSyncing: false,
+      workspaceNotice: null,
+
+      openTabIds: [],
       tabBuffers: {},
+      sidebarRevealFolderIds: [],
 
       // ── Project actions ────────────────────────────────────────────────────
 
@@ -324,34 +343,91 @@ export const useIDEStore = create<IDEStore>()(
           isNewProjectModalOpen: false,
           openTabIds: file ? [file.id] : [],
           tabBuffers: {},
+          workspaceNotice: null,
         }));
+        void createCloudProject(project)
+          .then(() => {
+            if (get().workspaceNotice?.startsWith("Cloud save failed")) {
+              set({ workspaceNotice: null });
+            }
+          })
+          .catch((err) => {
+            const message = err instanceof Error ? err.message : String(err);
+            set({
+              workspaceNotice: `Cloud save failed: ${message}. This project may disappear after reload.`,
+            });
+            get().addLog(
+              makeLog("error", `Cloud save failed: ${message}`, "network"),
+            );
+            get().setBottomPanelOpen(true);
+            get().setLogTab("network");
+          });
         return project;
       },
 
       loadProject: (id) => {
-        const project = get().projects.find((p) => p.id === id);
+        const {
+          projects,
+          activeProjectId,
+          activeFileId,
+          code,
+          tabBuffers,
+        } = get();
+
+        // Flush previous project's open buffer without bumping its updatedAt
+        // (bumping would re-sort it above the project you just opened).
+        let list = projects;
+        if (activeProjectId && activeProjectId !== id && activeFileId) {
+          const content = tabBuffers[activeFileId] ?? code;
+          list = projects.map((p) => {
+            if (p.id !== activeProjectId) return p;
+            const file = p.files.find((f) => f.id === activeFileId);
+            if (!file || file.content === content) return p;
+            return {
+              ...p,
+              files: p.files.map((f) =>
+                f.id === activeFileId
+                  ? { ...f, content, updatedAt: Date.now() }
+                  : f,
+              ),
+            };
+          });
+          const flushed = list.find((p) => p.id === activeProjectId);
+          if (flushed && flushed !== projects.find((p) => p.id === activeProjectId)) {
+            scheduleProjectSync(flushed);
+          }
+        }
+
+        const project = list.find((p) => p.id === id);
         if (!project) return;
+
+        // Keep the opened project at the top (MRU).
+        const now = Date.now();
+        const opened = { ...project, updatedAt: now };
+        const reordered = [opened, ...list.filter((p) => p.id !== id)];
         const file =
-          project.files.find((f) => f.id === project.activeFileId) ??
-          project.files[0] ??
+          opened.files.find((f) => f.id === opened.activeFileId) ??
+          opened.files[0] ??
           null;
+
         set({
+          projects: reordered,
           activeProjectId: id,
-          activeProject: project,
+          activeProject: opened,
           activeFileId: file?.id ?? null,
           activeFile: file,
           code: file?.content ?? "",
           isDirty: false,
           saveStatus: "saved",
-          // Restore per-project results; clear ephemeral state (logs, simulate)
-          compileResult: project.compileResult ?? null,
+          compileResult: opened.compileResult ?? null,
           simulateResult: null,
-          deployResult: project.deployResult ?? null,
-          witnessValues: project.witnessValues ?? {},
+          deployResult: opened.deployResult ?? null,
+          witnessValues: opened.witnessValues ?? {},
           logs: [],
           openTabIds: file ? [file.id] : [],
           tabBuffers: {},
         });
+        syncProjectNow(opened);
       },
 
       setActiveFile: (fileId) => {
@@ -386,8 +462,16 @@ export const useIDEStore = create<IDEStore>()(
         // 2. Add to tab strip if not already open
         const newTabs = openTabIds.includes(fileId) ? openTabIds : [...openTabIds, fileId];
 
-        // 3. Load content: prefer buffer, then file content
-        const newCode = newBuffers[fileId] ?? file.content;
+        // 3. Load content: prefer tab buffer, but never keep a stale deployment.json
+        // after Deploy/save updated the project file.
+        const buffered = newBuffers[fileId];
+        const fileNow = updatedProject.files.find((f) => f.id === fileId) ?? file;
+        const newCode =
+          buffered === undefined ||
+          (fileNow.name === "deployment.json" && buffered !== fileNow.content)
+            ? fileNow.content
+            : buffered;
+        newBuffers[fileId] = newCode;
 
         set({
           openTabIds: newTabs,
@@ -496,17 +580,111 @@ export const useIDEStore = create<IDEStore>()(
       },
 
       renameFolder: (folderId, name) => {
+        const trimmed = name.trim();
+        if (!trimmed) return;
         const { activeProjectId, activeProject, projects } = get();
         if (!activeProjectId || !activeProject) return;
+        const target = activeProject.folders.find((f) => f.id === folderId);
+        if (!target) return;
+        const locked = new Set([
+          "contracts",
+          "src",
+          "managed",
+          "compiler",
+          "keys",
+          "zkir",
+          "contract",
+          "dist",
+          "midnight-level-db",
+          "node_modules",
+        ]);
+        if (locked.has(target.name.toLowerCase()) || locked.has(trimmed.toLowerCase())) return;
+        // Block renames inside managed artifact trees
+        const byId = new Map(activeProject.folders.map((f) => [f.id, f]));
+        let walk: string | null = target.parentId;
+        while (walk) {
+          const p = byId.get(walk);
+          if (!p) break;
+          if (p.name.toLowerCase() === "managed") return;
+          walk = p.parentId;
+        }
+        const siblingClash = activeProject.folders.some(
+          (f) =>
+            f.id !== folderId &&
+            f.parentId === target.parentId &&
+            f.name.toLowerCase() === trimmed.toLowerCase(),
+        );
+        if (siblingClash) return;
         const updated: Project = {
           ...activeProject,
-          folders: activeProject.folders.map((f) => f.id === folderId ? { ...f, name } : f),
+          folders: activeProject.folders.map((f) =>
+            f.id === folderId ? { ...f, name: trimmed } : f,
+          ),
           updatedAt: Date.now(),
         };
         set({
-          projects: projects.map((p) => p.id === activeProjectId ? updated : p),
+          projects: projects.map((p) => (p.id === activeProjectId ? updated : p)),
           activeProject: updated,
         });
+        scheduleProjectSync(updated);
+      },
+
+      renameFile: (fileId, name) => {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        const { activeProjectId, activeProject, projects, activeFile } = get();
+        if (!activeProjectId || !activeProject) return;
+        const target = activeProject.files.find((f) => f.id === fileId);
+        if (!target) return;
+        // Only `.compact` sources may be renamed (not scaffold / managed artifacts)
+        const lockedFiles = new Set([
+          "package.json",
+          "tsconfig.json",
+          "deployment.json",
+          "providers.ts",
+        ]);
+        if (lockedFiles.has(target.name)) return;
+        const isCompact =
+          target.language === "compact" || target.name.toLowerCase().endsWith(".compact");
+        if (!isCompact) return;
+        const byId = new Map(activeProject.folders.map((f) => [f.id, f]));
+        let walk: string | null = target.folderId ?? null;
+        while (walk) {
+          const p = byId.get(walk);
+          if (!p) break;
+          if (p.name.toLowerCase() === "managed") return;
+          walk = p.parentId;
+        }
+        const safeName = trimmed.toLowerCase().endsWith(".compact")
+          ? trimmed
+          : `${trimmed.replace(/\.+$/, "")}.compact`;
+        const siblingClash = activeProject.files.some(
+          (f) =>
+            f.id !== fileId &&
+            (f.folderId ?? null) === (target.folderId ?? null) &&
+            f.name.toLowerCase() === safeName.toLowerCase(),
+        );
+        if (siblingClash) return;
+
+        const updated: Project = {
+          ...activeProject,
+          files: activeProject.files.map((f) =>
+            f.id === fileId
+              ? { ...f, name: safeName, language: "compact", updatedAt: Date.now() }
+              : f,
+          ),
+          updatedAt: Date.now(),
+        };
+        const nextActiveFile =
+          activeFile?.id === fileId
+            ? (updated.files.find((f) => f.id === fileId) ?? activeFile)
+            : activeFile;
+        set({
+          projects: projects.map((p) => (p.id === activeProjectId ? updated : p)),
+          activeProject: updated,
+          activeFile: nextActiveFile,
+        });
+        scheduleProjectSync(updated);
       },
 
       addFile: (name, language = "compact", folderId = null) => {
@@ -552,7 +730,7 @@ export const useIDEStore = create<IDEStore>()(
           isDirty: false,
           saveStatus: "saved",
         });
-
+        scheduleProjectSync(updated);
         return file;
       },
 
@@ -581,6 +759,8 @@ export const useIDEStore = create<IDEStore>()(
           return f;
         };
 
+        const slug = activeProject.slug;
+
         for (const newFile of files) {
           // Remap compiler output into contracts/managed/[project-slug]/<path>
           // Compact emits: compiler/, contract/, zkir/, keys/ directly in outputDir.
@@ -588,7 +768,6 @@ export const useIDEStore = create<IDEStore>()(
           //   contracts/managed/hello-world/compiler/contract-info.json
           //   contracts/managed/hello-world/contract/index.js
           //   contracts/managed/hello-world/zkir/storeMessage.zkir
-          const slug = activeProject.slug;
           const rawPath = newFile.path ?? newFile.name;
           const prefixed = `managed/${slug}/${rawPath}`;
 
@@ -619,10 +798,26 @@ export const useIDEStore = create<IDEStore>()(
         }
 
         const updated: Project = { ...activeProject, folders, files: updatedFiles, updatedAt: now };
+
+        // Expand contracts → managed → <slug> in the sidebar so artifacts are visible.
+        const revealIds: string[] = [];
+        const contractsId = contractsFolder!.id;
+        revealIds.push(contractsId);
+        const managed = folders.find((f) => f.name === "managed" && f.parentId === contractsId);
+        if (managed) {
+          revealIds.push(managed.id);
+          const slugFolder = folders.find(
+            (f) => f.name === slug && f.parentId === managed.id,
+          );
+          if (slugFolder) revealIds.push(slugFolder.id);
+        }
+
         set({
           projects: projects.map((p) => (p.id === activeProjectId ? updated : p)),
           activeProject: updated,
+          sidebarRevealFolderIds: revealIds,
         });
+        scheduleProjectSync(updated);
       },
 
       deleteFile: (fileId) => {
@@ -699,12 +894,22 @@ export const useIDEStore = create<IDEStore>()(
             activeProject: updatedProject,
             saveStatus: "saved",
           });
+          if (updatedProject) scheduleProjectSync(updatedProject);
         }, 300);
       },
 
       deleteProject: (id) => {
         const { projects, activeProjectId } = get();
         const filtered = projects.filter((p) => p.id !== id);
+        void deleteCloudProject(id).catch((err) => {
+          const message = err instanceof Error ? err.message : String(err);
+          set({
+            workspaceNotice: `Cloud delete failed: ${message}. Project may reappear after reload.`,
+          });
+          get().addLog(
+            makeLog("error", `Cloud delete failed: ${message}`, "network"),
+          );
+        });
         if (id === activeProjectId) {
           const next = filtered[0] ?? null;
           const nextFile = next
@@ -719,6 +924,11 @@ export const useIDEStore = create<IDEStore>()(
             activeFileId: nextFile?.id ?? null,
             activeFile: nextFile,
             code: nextFile?.content ?? "",
+            compileResult: next?.compileResult ?? null,
+            deployResult: next?.deployResult ?? null,
+            witnessValues: next?.witnessValues ?? {},
+            openTabIds: nextFile ? [nextFile.id] : [],
+            tabBuffers: {},
           });
         } else {
           set({ projects: filtered });
@@ -727,16 +937,186 @@ export const useIDEStore = create<IDEStore>()(
 
       renameProject: (id, name) => {
         const s = slugify(name);
-        set((state) => ({
-          projects: state.projects.map((p) =>
-            p.id === id ? { ...p, name, slug: s } : p
-          ),
-          activeProject:
+        set((state) => {
+          const projects = state.projects.map((p) =>
+            p.id === id ? { ...p, name, slug: s, updatedAt: Date.now() } : p,
+          );
+          const activeProject =
             state.activeProject?.id === id
-              ? { ...state.activeProject, name, slug: s }
-              : state.activeProject,
-        }));
+              ? { ...state.activeProject, name, slug: s, updatedAt: Date.now() }
+              : state.activeProject;
+          const updated = projects.find((p) => p.id === id);
+          if (updated) syncProjectNow(updated);
+          return { projects, activeProject };
+        });
       },
+
+      hydrateProjectsFromCloud: async () => {
+        setProjectSyncEnabled(true);
+        setProjectSyncErrorHandler((message) => {
+          set({ workspaceNotice: message });
+          get().addLog(makeLog("error", message, "network"));
+        });
+        set({ projectsSyncing: true });
+        try {
+          let cloud = await fetchCloudProjects();
+
+          // First login: seed Hello World so public users are never at 0 projects.
+          if (cloud.length === 0) {
+            const now = Date.now();
+            const seed = buildProject(
+              generateId(),
+              "Hello, Midnight!",
+              "hello-world",
+              "Store a public string on-chain. Bundled keys ready, or Compile then Deploy.",
+              now,
+              now,
+            );
+            try {
+              const created = await createCloudProject(seed);
+              cloud = [created];
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              set({
+                workspaceNotice: `Could not create starter project: ${message}`,
+              });
+              cloud = [seed];
+            }
+          }
+
+          const activeId = get().activeProjectId;
+          const preferred =
+            cloud.find((p) => p.id === activeId) ?? cloud[0] ?? null;
+          const file = preferred
+            ? (preferred.files.find((f) => f.id === preferred.activeFileId) ??
+                preferred.files[0] ??
+                null)
+            : null;
+          set({
+            projects: cloud,
+            activeProjectId: preferred?.id ?? null,
+            activeProject: preferred,
+            activeFileId: file?.id ?? null,
+            activeFile: file,
+            code: file?.content ?? "",
+            compileResult: preferred?.compileResult ?? null,
+            deployResult: preferred?.deployResult ?? null,
+            witnessValues: preferred?.witnessValues ?? {},
+            openTabIds: file ? [file.id] : [],
+            tabBuffers: {},
+            projectsHydrated: true,
+            projectsSyncing: false,
+            isDirty: false,
+            saveStatus: "saved",
+          });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          console.warn("[ide] hydrateProjectsFromCloud failed", err);
+          set({
+            projectsHydrated: true,
+            projectsSyncing: false,
+            workspaceNotice: `Could not load projects: ${message}`,
+          });
+        }
+      },
+
+      saveContractAddress: (address) => {
+        const trimmed = address.trim();
+        if (!trimmed) return;
+        const { activeProjectId, activeProject, projects, deployResult } = get();
+        if (!activeProjectId || !activeProject) return;
+        const nextDeploy: DeployResult = {
+          success: true,
+          contractAddress: trimmed,
+          transactionHash: deployResult?.transactionHash,
+          blockNumber: deployResult?.blockNumber,
+          duration: deployResult?.duration ?? 0,
+        };
+        const payload = JSON.stringify(
+          {
+            network: "preprod",
+            contractAddress: trimmed,
+            txHash: nextDeploy.transactionHash ?? null,
+            blockHeight: nextDeploy.blockNumber ?? null,
+            deployedAt: new Date().toISOString(),
+            template: activeProject.template,
+            artifactBaseUrl: activeProject.artifactBaseUrl ?? null,
+          },
+          null,
+          2,
+        );
+        let files = activeProject.files;
+        const idx = files.findIndex(
+          (f) => f.name === "deployment.json" && (f.folderId == null || f.folderId === ""),
+        );
+        let deploymentFileId: string;
+        if (idx >= 0) {
+          deploymentFileId = files[idx]!.id;
+          files = files.map((f, i) =>
+            i === idx ? { ...f, content: payload, updatedAt: Date.now() } : f,
+          );
+        } else {
+          deploymentFileId = generateId();
+          files = [
+            ...files,
+            {
+              id: deploymentFileId,
+              name: "deployment.json",
+              language: "json" as const,
+              content: payload,
+              folderId: null,
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            },
+          ];
+        }
+        const { activeFileId, activeFile, tabBuffers } = get();
+        const nextBuffers = { ...tabBuffers, [deploymentFileId]: payload };
+        const updated = {
+          ...activeProject,
+          files,
+          deployResult: nextDeploy,
+          updatedAt: Date.now(),
+        };
+        set({
+          deployResult: nextDeploy,
+          activeProject: updated,
+          projects: projects.map((p) => (p.id === activeProjectId ? updated : p)),
+          tabBuffers: nextBuffers,
+          ...(activeFileId === deploymentFileId
+            ? {
+                code: payload,
+                activeFile: files.find((f) => f.id === deploymentFileId) ?? activeFile,
+                isDirty: false,
+                saveStatus: "saved" as const,
+              }
+            : {}),
+        });
+        syncProjectNow(updated);
+      },
+
+      clearWorkspace: () => {
+        setProjectSyncEnabled(false);
+        set({
+          projects: [],
+          activeProjectId: null,
+          activeProject: null,
+          activeFileId: null,
+          activeFile: null,
+          code: "",
+          compileResult: null,
+          deployResult: null,
+          witnessValues: {},
+          openTabIds: [],
+          tabBuffers: {},
+          projectsHydrated: false,
+          projectsSyncing: false,
+          workspaceNotice: null,
+          sidebarRevealFolderIds: [],
+        });
+      },
+
+      setWorkspaceNotice: (workspaceNotice) => set({ workspaceNotice }),
 
       // ── IDE actions ────────────────────────────────────────────────────────
       setStatus: (status) => set({ status }),
@@ -778,15 +1158,21 @@ export const useIDEStore = create<IDEStore>()(
             activeProject: updated,
             projects: projects.map((p) => (p.id === activeProjectId ? updated : p)),
           });
+          syncProjectNow(updated);
         } else {
           set({ compileResult });
         }
       },
       setSimulateResult: (simulateResult) => set({ simulateResult }),
       setDeployResult: (deployResult) => {
-        const { activeProjectId, activeProject, projects } = get();
+        const { activeProjectId, activeProject, projects, activeFileId, activeFile, tabBuffers } =
+          get();
         if (activeProjectId && activeProject) {
           let files = activeProject.files;
+          let nextBuffers = tabBuffers;
+          let nextCode: string | undefined;
+          let nextActiveFile = activeFile;
+
           if (deployResult?.success) {
             const payload = JSON.stringify(
               {
@@ -801,16 +1187,21 @@ export const useIDEStore = create<IDEStore>()(
               null,
               2,
             );
-            const idx = files.findIndex((f) => f.name === "deployment.json" && !f.folderId);
+            const idx = files.findIndex(
+              (f) => f.name === "deployment.json" && (f.folderId == null || f.folderId === ""),
+            );
+            let deploymentFileId: string;
             if (idx >= 0) {
+              deploymentFileId = files[idx]!.id;
               files = files.map((f, i) =>
                 i === idx ? { ...f, content: payload, updatedAt: Date.now() } : f,
               );
             } else {
+              deploymentFileId = generateId();
               files = [
                 ...files,
                 {
-                  id: generateId(),
+                  id: deploymentFileId,
                   name: "deployment.json",
                   language: "json" as const,
                   content: payload,
@@ -820,7 +1211,15 @@ export const useIDEStore = create<IDEStore>()(
                 },
               ];
             }
+
+            // Keep editor / tab buffer in sync so the file does not look empty after Deploy.
+            nextBuffers = { ...tabBuffers, [deploymentFileId]: payload };
+            if (activeFileId === deploymentFileId) {
+              nextCode = payload;
+              nextActiveFile = files.find((f) => f.id === deploymentFileId) ?? activeFile;
+            }
           }
+
           const updated = {
             ...activeProject,
             deployResult,
@@ -831,7 +1230,12 @@ export const useIDEStore = create<IDEStore>()(
             deployResult,
             activeProject: updated,
             projects: projects.map((p) => (p.id === activeProjectId ? updated : p)),
+            tabBuffers: nextBuffers,
+            ...(nextCode !== undefined
+              ? { code: nextCode, activeFile: nextActiveFile, isDirty: false, saveStatus: "saved" }
+              : {}),
           });
+          syncProjectNow(updated);
         } else {
           set({ deployResult });
         }
@@ -840,12 +1244,13 @@ export const useIDEStore = create<IDEStore>()(
         const { activeProjectId, activeProject, projects, witnessValues } = get();
         const next = { ...witnessValues, [name]: value };
         if (activeProjectId && activeProject) {
-          const updated = { ...activeProject, witnessValues: next };
+          const updated = { ...activeProject, witnessValues: next, updatedAt: Date.now() };
           set({
             witnessValues: next,
             activeProject: updated,
             projects: projects.map((p) => (p.id === activeProjectId ? updated : p)),
           });
+          scheduleProjectSync(updated);
         } else {
           set({ witnessValues: next });
         }
@@ -853,12 +1258,13 @@ export const useIDEStore = create<IDEStore>()(
       setWitnessValues: (next) => {
         const { activeProjectId, activeProject, projects } = get();
         if (activeProjectId && activeProject) {
-          const updated = { ...activeProject, witnessValues: next };
+          const updated = { ...activeProject, witnessValues: next, updatedAt: Date.now() };
           set({
             witnessValues: next,
             activeProject: updated,
             projects: projects.map((p) => (p.id === activeProjectId ? updated : p)),
           });
+          scheduleProjectSync(updated);
         } else {
           set({ witnessValues: next });
         }
@@ -880,30 +1286,34 @@ export const useIDEStore = create<IDEStore>()(
         set({ isNewProjectModalOpen: open, newProjectModalTemplate: template }),
       // Compact version is pinned server-side; keep field for persisted state shape only.
       setCompactVersion: () => set({ compactVersion: COMPACT_STABLE_VERSION }),
+      clearSidebarReveal: () => set({ sidebarRevealFolderIds: [] }),
     }),
     {
-      name: "compactlab-v5",
-      version: 5,
+      name: "compactlab-v6",
+      version: 6,
       migrate: (persistedState, fromVersion) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const state = persistedState as any;
-        if (state?.rightPanelTab === "simulation" || state?.rightPanelTab === "privacy") {
+        if (
+          state?.rightPanelTab === "simulation" ||
+          state?.rightPanelTab === "privacy" ||
+          (state?.rightPanelTab &&
+            state.rightPanelTab !== "contract-ui" &&
+            state.rightPanelTab !== "source-scan" &&
+            state.rightPanelTab !== "learn")
+        ) {
           state.rightPanelTab = "contract-ui";
         }
-        if (fromVersion < 5) {
-          if (state?.projects) {
-            const now = Date.now();
-            state.projects = state.projects.map((proj: Project) => {
-              if (proj.template) {
-                return buildProject(proj.id, proj.name, proj.template, proj.description, proj.createdAt ?? now, now);
-              }
-              return proj;
-            });
-          }
+        // v6: projects are per-user in the API — drop auto-seeded local templates
+        if (fromVersion < 6) {
+          state.projects = [];
+          state.activeProjectId = null;
+          state.openTabIds = [];
         }
         return persistedState as any;
       },
       partialize: (state) => ({
+        // Cache last-known cloud projects for faster paint; cloud rehydrate is source of truth
         projects: state.projects,
         activeProjectId: state.activeProjectId,
         openTabIds: state.openTabIds,
@@ -914,6 +1324,7 @@ export const useIDEStore = create<IDEStore>()(
       onRehydrateStorage: () => (state) => {
         if (!state) return;
         state.compactVersion = COMPACT_STABLE_VERSION;
+        state.projectsHydrated = false;
         const proj = state.projects?.find(
           (p) => p.id === state.activeProjectId
         );
@@ -926,15 +1337,22 @@ export const useIDEStore = create<IDEStore>()(
           state.activeFileId = file?.id ?? null;
           state.activeFile = file ?? null;
           state.code = file?.content ?? "";
-          // Restore per-project results (same as loadProject)
           state.compileResult = proj.compileResult ?? null;
           state.deployResult = proj.deployResult ?? null;
           state.witnessValues = proj.witnessValues ?? {};
-          // Validate persisted tab IDs still exist in the project
           const validFileIds = new Set(proj.files?.map((f) => f.id) ?? []);
           const restoredTabs = (state.openTabIds ?? []).filter((id) => validFileIds.has(id));
           state.openTabIds = restoredTabs.length > 0 ? restoredTabs : (file ? [file.id] : []);
           state.tabBuffers = {};
+        } else {
+          state.activeProject = null;
+          state.activeFileId = null;
+          state.activeFile = null;
+          state.code = "";
+          state.compileResult = null;
+          state.deployResult = null;
+          state.witnessValues = {};
+          state.openTabIds = [];
         }
       },
     }
