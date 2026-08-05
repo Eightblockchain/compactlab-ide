@@ -23,6 +23,7 @@ import {
   listMidnightWallets,
   type DetectedWallet,
 } from "@/lib/wallet-detect";
+import { readDustBalance, type DustBalanceInfo } from "@/lib/dust-balance";
 
 export type { DetectedWallet } from "@/lib/wallet-detect";
 export { isOneAmWallet, listMidnightWallets } from "@/lib/wallet-detect";
@@ -37,6 +38,9 @@ export interface UseMidnightWalletReturn {
   connectedAPI: ConnectedAPI | null;
   walletInfo: WalletInfo | null;
   connectedWalletName: string | null;
+  /** Live tDUST from getDustBalance(); null if unavailable. */
+  dustBalance: DustBalanceInfo | null;
+  refreshDustBalance: () => Promise<DustBalanceInfo | null>;
   connectTo: (wallet: DetectedWallet) => Promise<ConnectedAPI | null>;
   connect: () => Promise<ConnectedAPI | null>;
   disconnect: () => void;
@@ -107,10 +111,22 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
   const [connectedAPI, setConnectedAPI] = useState<ConnectedAPI | null>(null);
   const [walletInfo, setWalletInfo] = useState<WalletInfo | null>(null);
   const [connectedWalletName, setConnectedWalletName] = useState<string | null>(null);
+  const [dustBalance, setDustBalance] = useState<DustBalanceInfo | null>(null);
 
   const refreshWallets = useCallback(() => {
     setAvailableWallets(listMidnightWallets());
   }, []);
+
+  const refreshDustBalance = useCallback(async (): Promise<DustBalanceInfo | null> => {
+    const api = connectedAPI;
+    if (!api) {
+      setDustBalance(null);
+      return null;
+    }
+    const info = await readDustBalance(api);
+    setDustBalance(info);
+    return info;
+  }, [connectedAPI]);
 
   useEffect(() => {
     let attempts = 0;
@@ -134,6 +150,25 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
     };
   }, []);
 
+  // Poll tDUST while connected (generation can change over time).
+  useEffect(() => {
+    if (!connectedAPI || status !== "connected") {
+      setDustBalance(null);
+      return;
+    }
+    let cancelled = false;
+    const pull = async () => {
+      const info = await readDustBalance(connectedAPI);
+      if (!cancelled) setDustBalance(info);
+    };
+    void pull();
+    const id = setInterval(() => void pull(), 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [connectedAPI, status]);
+
   const connectTo = useCallback(async (wallet: DetectedWallet): Promise<ConnectedAPI | null> => {
     setStatus("connecting");
     setError(null);
@@ -148,6 +183,7 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
 
       const addresses = await api.getShieldedAddresses();
       const { unshieldedAddress } = await api.getUnshieldedAddress();
+      const dust = await readDustBalance(api);
 
       setConnectedAPI(api);
       setConnectedWalletName(wallet.api.name || "1AM");
@@ -157,6 +193,7 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
         shieldedEncryptionPublicKey: addresses.shieldedEncryptionPublicKey,
         unshieldedAddress,
       });
+      setDustBalance(dust);
       setStatus("connected");
       return api;
     } catch (err) {
@@ -166,6 +203,7 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
       setConnectedAPI(null);
       setWalletInfo(null);
       setConnectedWalletName(null);
+      setDustBalance(null);
       return null;
     }
   }, []);
@@ -181,7 +219,7 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
       return null;
     }
     if (wallets.length > 1) {
-      setError("Multiple 1AM injections detected — choose one from the menu.");
+      setError("Multiple 1AM injections detected - choose one from the menu.");
       setStatus("error");
       return null;
     }
@@ -192,6 +230,7 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
     setConnectedAPI(null);
     setWalletInfo(null);
     setConnectedWalletName(null);
+    setDustBalance(null);
     setStatus("disconnected");
     setError(null);
   }, []);
@@ -205,6 +244,8 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
       connectedAPI,
       walletInfo,
       connectedWalletName,
+      dustBalance,
+      refreshDustBalance,
       connectTo,
       connect,
       disconnect,
@@ -217,6 +258,8 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
       connectedAPI,
       walletInfo,
       connectedWalletName,
+      dustBalance,
+      refreshDustBalance,
       connectTo,
       connect,
       disconnect,
