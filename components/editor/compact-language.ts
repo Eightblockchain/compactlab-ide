@@ -1,47 +1,33 @@
 import type * as Monaco from "monaco-editor";
+import {
+  ADT_METHODS,
+  COMPACT_BUILTINS,
+  COMPACT_KEYWORDS,
+  COMPACT_TYPES,
+  baseAdtName,
+  extractAllSymbols,
+  extractLedgerVars,
+  hoverDocForWord,
+  lookupSymbol,
+  stdlibCompletions,
+} from "@/lib/compact-symbols";
+import { registerCompactLanguageService } from "@/lib/compact-lsp";
+
+let compactLanguageRegistered = false;
 
 export function registerCompactLanguage(monaco: typeof Monaco) {
-  // Register language
+  if (compactLanguageRegistered) return;
+  compactLanguageRegistered = true;
+
   monaco.languages.register({ id: "compact" });
 
-  // Syntax tokenizer
   monaco.languages.setMonarchTokensProvider("compact", {
     defaultToken: "text",
     tokenPostfix: ".compact",
 
-    keywords: [
-      "pragma",
-      "import",
-      "contract",
-      "circuit",
-      "export",
-      "ledger",
-      "witness",
-      "constructor",
-      "return",
-      "if",
-      "else",
-      "while",
-      "for",
-      "const",
-      "let",
-      "assert",
-      "hash",
-      "true",
-      "false",
-    ],
-
-    types: [
-      "Uint",
-      "Boolean",
-      "Bytes",
-      "Field",
-      "PublicKey",
-      "Signature",
-      "CellPath",
-      "ZSwapMerkleTree",
-      "CompactStandardLibrary",
-    ],
+    keywords: [...COMPACT_KEYWORDS],
+    types: [...COMPACT_TYPES],
+    builtins: [...COMPACT_BUILTINS],
 
     operators: [
       "=", ">", "<", "!", "~", "?", ":",
@@ -52,45 +38,26 @@ export function registerCompactLanguage(monaco: typeof Monaco) {
 
     tokenizer: {
       root: [
-        // Pragmas
         [/pragma\b/, "keyword.pragma"],
-
-        // Comments
         [/\/\/.*$/, "comment"],
         [/\/\*/, "comment", "@comment"],
-
-        // Strings
         [/"([^"\\]|\\.)*"/, "string"],
         [/'([^'\\]|\\.)*'/, "string"],
-
-        // Numbers
         [/\d+/, "number"],
-
-        // Keywords, types, identifiers
         [/[a-zA-Z_][\w]*/, {
           cases: {
             "@keywords": "keyword",
             "@types": "type",
+            "@builtins": "builtin",
             "@default": "identifier",
           },
         }],
-
-        // Angle brackets for generics like Uint<32>
         [/<\d+>/, "number"],
-
-        // Brackets
         [/[{}[\]()]/, "delimiter.bracket"],
-
-        // Operators
         [/[=<>!+\-*&|^%?:/~]/, "operator"],
-
-        // Semicolons
         [/;/, "delimiter"],
-
-        // Whitespace
         [/\s+/, "white"],
       ],
-
       comment: [
         [/[^/*]+/, "comment"],
         [/\*\//, "comment", "@pop"],
@@ -99,27 +66,16 @@ export function registerCompactLanguage(monaco: typeof Monaco) {
     },
   } as Monaco.languages.IMonarchLanguage);
 
-  // ─── CompactLab Dark syntax tokens ─────────────────────────────────────────
-  // Editor bg: #111111 — deep dark, crisp text contrast.
-  // Color roles (all warm-neutral, no blue, no purple, no muddy brown):
-  //   keywords    #F06358  brand coral-red, bold — contract / circuit / ledger
-  //   types       #E8AA5B  warm amber — Uint / Boolean / Bytes / Field
-  //   strings     #95CF98  soft sage-green — string literals
-  //   numbers     #D4956A  warm terracotta — numeric values
-  //   comments    #666360  warm-grey italic, ~3.3:1 contrast — readable but recedes
-  //   identifiers #E8E8E8  near-white — variable/function names, dominant
-  //   operators   #C8C8BE  warm light-grey — punctuation, neutral
-  //   brackets    #C8C8BE  same — no rainbow coloring
-  //   delimiters  #666360  same as comments — receded semicolons/colons
-  // ────────────────────────────────────────────────────────────────────────────
   const compactThemeRules: Monaco.editor.ITokenThemeRule[] = [
     { token: "keyword",           foreground: "F06358", fontStyle: "bold" },
     { token: "keyword.pragma",    foreground: "F06358", fontStyle: "italic" },
     { token: "type",              foreground: "E8AA5B" },
+    { token: "builtin",           foreground: "7EC8E3" },
     { token: "string",            foreground: "95CF98" },
     { token: "number",            foreground: "D4956A" },
     { token: "comment",           foreground: "5E6860", fontStyle: "italic" },
     { token: "identifier",        foreground: "E2E2E2" },
+    { token: "identifier.ledger", foreground: "C9B8FF" },
     { token: "operator",          foreground: "AAAAAA" },
     { token: "delimiter.bracket", foreground: "888888" },
     { token: "delimiter",         foreground: "555555" },
@@ -127,49 +83,32 @@ export function registerCompactLanguage(monaco: typeof Monaco) {
     { token: "",                  foreground: "E2E2E2" },
   ];
 
-  // ─── Monaco editor theme ─────────────────────────────────────────────────
-  // Deep dark: #111111 editor sits slightly above #0d0d0d shell.
-  // All widgetbackgrounds match the shell (#0d0d0d / #111111).
-  // Selection and highlights use the F06358 brand coral.
-  // No blues or purples anywhere — every color is warm or neutral grey.
-  // ─────────────────────────────────────────────────────────────────────────
   monaco.editor.defineTheme("compactlab-dark", {
     base: "vs-dark",
     inherit: true,
     rules: compactThemeRules,
     colors: {
-      // Core
       "editor.background":                       "#111111",
       "editor.foreground":                       "#E2E2E2",
-      // Active line — very subtle lift, not distracting
       "editor.lineHighlightBackground":          "#1a1a1a",
       "editor.lineHighlightBorder":              "#00000000",
-      // Selection — brand coral tint
       "editor.selectionBackground":              "#F0635840",
       "editor.selectionHighlightBackground":     "#F0635820",
       "editor.inactiveSelectionBackground":      "#F0635825",
-      // Occurrence highlights (double-click word)
       "editor.wordHighlightBackground":          "#F0635818",
       "editor.wordHighlightStrongBackground":    "#F0635828",
-      // Line numbers
       "editorLineNumber.foreground":             "#3a3a38",
       "editorLineNumber.activeForeground":       "#888884",
-      // Cursor
       "editorCursor.foreground":                 "#F06358",
       "editorCursor.background":                 "#111111",
-      // Find/search
       "editor.findMatchBackground":              "#F0635855",
       "editor.findMatchHighlightBackground":     "#F0635830",
       "editor.findMatchBorder":                  "#F06358",
-      // Gutter (error/warning decorations bg)
       "editorGutter.background":                 "#111111",
-      // Whitespace / indent guides
       "editorIndentGuide.background1":           "#222220",
       "editorIndentGuide.activeBackground1":     "#444440",
-      // Bracket match
       "editorBracketMatch.background":           "#F0635828",
       "editorBracketMatch.border":               "#F06358",
-      // Bracket pair colorization — override with neutral so no blues appear
       "editorBracketHighlight.foreground1":      "#888888",
       "editorBracketHighlight.foreground2":      "#888888",
       "editorBracketHighlight.foreground3":      "#888888",
@@ -177,17 +116,14 @@ export function registerCompactLanguage(monaco: typeof Monaco) {
       "editorBracketHighlight.foreground5":      "#888888",
       "editorBracketHighlight.foreground6":      "#888888",
       "editorBracketHighlight.unexpectedBracket.foreground": "#F06358",
-      // Scrollbar
       "scrollbarSlider.background":              "#ffffff14",
       "scrollbarSlider.hoverBackground":         "#ffffff22",
       "scrollbarSlider.activeBackground":        "#ffffff30",
       "scrollbar.shadow":                        "#00000000",
-      // Widgets (suggest dropdown, hover card, rename)
       "editorWidget.background":                 "#191919",
       "editorWidget.foreground":                 "#E2E2E2",
       "editorWidget.border":                     "#333333",
       "editorWidget.resizeBorder":               "#F06358",
-      // Autocomplete dropdown
       "editorSuggestWidget.background":          "#191919",
       "editorSuggestWidget.border":              "#333333",
       "editorSuggestWidget.foreground":          "#E2E2E2",
@@ -195,12 +131,10 @@ export function registerCompactLanguage(monaco: typeof Monaco) {
       "editorSuggestWidget.selectedForeground":  "#F06358",
       "editorSuggestWidget.highlightForeground": "#F06358",
       "editorSuggestWidget.focusHighlightForeground": "#F5786D",
-      // Hover card
       "editorHoverWidget.background":            "#191919",
       "editorHoverWidget.foreground":            "#E2E2E2",
       "editorHoverWidget.border":                "#333333",
       "editorHoverWidget.statusBarBackground":   "#222222",
-      // Peek view (go-to-definition inline)
       "peekView.border":                         "#F06358",
       "peekViewTitle.background":                "#191919",
       "peekViewTitleLabel.foreground":           "#E8E8E8",
@@ -208,35 +142,22 @@ export function registerCompactLanguage(monaco: typeof Monaco) {
       "peekViewResult.selectionBackground":      "#F0635828",
       "peekViewEditor.background":               "#111111",
       "peekViewEditorGutter.background":         "#111111",
-      // Inline parameter hints
       "editorInlayHint.background":              "#191919",
       "editorInlayHint.foreground":              "#666360",
-      // Error / warning squiggles
       "editorError.foreground":                  "#F06358",
       "editorWarning.foreground":                "#D4A853",
       "editorInfo.foreground":                   "#D4A853",
-      // Editor overview ruler (right edge minimap)
       "editorOverviewRuler.background":          "#111111",
       "editorOverviewRuler.border":              "#00000000",
       "editorOverviewRuler.errorForeground":     "#F06358",
       "editorOverviewRuler.warningForeground":   "#D4A853",
-      // Minimap (disabled but just in case)
       "minimap.background":                      "#111111",
     },
   });
 
-  // Language configuration
   monaco.languages.setLanguageConfiguration("compact", {
-    comments: {
-      lineComment: "//",
-      blockComment: ["/*", "*/"],
-    },
-    brackets: [
-      ["{", "}"],
-      ["[", "]"],
-      ["(", ")"],
-      ["<", ">"],
-    ],
+    comments: { lineComment: "//", blockComment: ["/*", "*/"] },
+    brackets: [["{", "}"], ["[", "]"], ["(", ")"], ["<", ">"]],
     autoClosingPairs: [
       { open: "{", close: "}" },
       { open: "[", close: "]" },
@@ -257,8 +178,8 @@ export function registerCompactLanguage(monaco: typeof Monaco) {
     },
   });
 
-  // Completion provider
   monaco.languages.registerCompletionItemProvider("compact", {
+    triggerCharacters: [".", "<"],
     provideCompletionItems: (model, position) => {
       const word = model.getWordUntilPosition(position);
       const range = {
@@ -268,15 +189,105 @@ export function registerCompactLanguage(monaco: typeof Monaco) {
         endColumn: word.endColumn,
       };
 
-      const snippets: Monaco.languages.CompletionItem[] = [
+      const code = model.getValue();
+      const linePrefix = model.getValueInRange({
+        startLineNumber: position.lineNumber,
+        startColumn: 1,
+        endLineNumber: position.lineNumber,
+        endColumn: position.column,
+      });
+
+      const suggestions: Monaco.languages.CompletionItem[] = [];
+
+      // Dot completion: ledgerVar.method or Enum.Variant
+      const dotMatch = linePrefix.match(/(\w+)\.(\w*)$/);
+      if (dotMatch) {
+        const base = dotMatch[1];
+        const ledger = extractLedgerVars(code).find((v) => v.name === base);
+        if (ledger?.type) {
+          const adt = baseAdtName(ledger.type);
+          if (adt && ADT_METHODS[adt]) {
+            for (const m of ADT_METHODS[adt]) {
+              suggestions.push({
+                label: m.name,
+                kind: monaco.languages.CompletionItemKind.Method,
+                insertText: `${m.name}($0)`,
+                insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                detail: `${base}: ${ledger.type} · ${m.detail}`,
+                documentation: `Method on ledger \`${base}\` (${ledger.type}).`,
+                range,
+              });
+            }
+          }
+        }
+        if (suggestions.length > 0) return { suggestions };
+      }
+
+      // File symbols: ledger, witness, circuits
+      for (const sym of extractAllSymbols(code)) {
+        const kind =
+          sym.kind === "ledger"
+            ? monaco.languages.CompletionItemKind.Field
+            : sym.kind === "witness"
+              ? monaco.languages.CompletionItemKind.Function
+              : sym.kind === "circuit"
+                ? monaco.languages.CompletionItemKind.Method
+                : sym.kind === "enum-variant"
+                  ? monaco.languages.CompletionItemKind.EnumMember
+                  : monaco.languages.CompletionItemKind.Enum;
+        const insertText =
+          sym.kind === "witness" ? `${sym.name}()` : sym.name;
+        suggestions.push({
+          label: sym.name,
+          kind,
+          insertText,
+          detail: sym.detail,
+          documentation: sym.documentation,
+          range,
+          sortText: sym.kind === "ledger" ? `0_${sym.name}` : `1_${sym.name}`,
+        });
+      }
+
+      // Stdlib
+      for (const fn of stdlibCompletions()) {
+        suggestions.push({
+          label: fn.name,
+          kind: monaco.languages.CompletionItemKind.Function,
+          insertText: fn.name === "pad" ? 'pad(${1:32}, "${2:domain}")' : `${fn.name}($0)`,
+          insertTextRules:
+            fn.name === "pad" || fn.name === "disclose"
+              ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+              : undefined,
+          detail: fn.detail,
+          documentation: fn.documentation,
+          range,
+        });
+      }
+
+      // Types
+      for (const t of COMPACT_TYPES) {
+        suggestions.push({
+          label: t,
+          kind: monaco.languages.CompletionItemKind.Class,
+          insertText: ["Uint", "Bytes", "Vector", "Opaque"].includes(t)
+            ? `${t}<${t === "Opaque" ? '"string"' : "32"}>`
+            : t,
+          insertTextRules: ["Uint", "Bytes", "Vector", "Opaque"].includes(t)
+            ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet
+            : undefined,
+          range,
+        });
+      }
+
+      // Keywords as snippets
+      suggestions.push(
         {
           label: "contract",
           kind: monaco.languages.CompletionItemKind.Snippet,
           insertText: [
             "contract ${1:ContractName} {",
-            "\t",
+            "\t$0",
             "\tconstructor() {",
-            "\t\t$0",
             "\t}",
             "}",
           ].join("\n"),
@@ -299,25 +310,32 @@ export function registerCompactLanguage(monaco: typeof Monaco) {
         {
           label: "ledger",
           kind: monaco.languages.CompletionItemKind.Snippet,
-          insertText: "ledger ${1:name}: ${2:Uint<32>};",
+          insertText: "export ledger ${1:name}: ${2:Counter};",
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-          documentation: "Declare a ledger state variable",
+          documentation: "Declare a public ledger state variable",
           range,
         },
         {
           label: "witness",
           kind: monaco.languages.CompletionItemKind.Snippet,
-          insertText: "witness ${1:name}: ${2:Uint<32>};",
+          insertText: "witness ${1:name}(): ${2:Bytes<32>};",
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-          documentation: "Declare a private witness variable",
+          documentation: "Declare a private witness (function form)",
+          range,
+        },
+        {
+          label: "enum",
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          insertText: "enum ${1:State} {\n\t${2:Open},\n\t${3:Closed}\n}",
+          insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+          documentation: "Define an enum type",
           range,
         },
         {
           label: "pragma",
           kind: monaco.languages.CompletionItemKind.Snippet,
           insertText: "pragma language_version >= 0.22;",
-          documentation:
-            "Language version pragma. CompactLab’s compiler package +0.30.0 implements language 0.22.0.",
+          documentation: "Language version pragma",
           range,
         },
         {
@@ -329,65 +347,76 @@ export function registerCompactLanguage(monaco: typeof Monaco) {
           range,
         },
         {
-          label: "Uint<32>",
-          kind: monaco.languages.CompletionItemKind.TypeParameter,
-          insertText: "Uint<${1:32}>",
+          label: "nullifier pattern",
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          insertText: [
+            "circuit nullifierFor(sk: Bytes<32>): Bytes<32> {",
+            "\treturn persistentHash<Vector<2, Bytes<32>>>([",
+            '\t\tpad(32, "${1:myapp:nullifier:v1}"),',
+            "\t\tsk",
+            "\t]);",
+            "}",
+          ].join("\n"),
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-          documentation: "Unsigned integer type",
+          documentation: "Domain-separated nullifier hash (keep pad string ≤ 32 bytes)",
           range,
         },
         {
-          label: "Bytes<32>",
-          kind: monaco.languages.CompletionItemKind.TypeParameter,
-          insertText: "Bytes<${1:32}>",
+          label: "disclose",
+          kind: monaco.languages.CompletionItemKind.Snippet,
+          insertText: "disclose(${1:value})",
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-          documentation: "Bytes type of fixed length",
+          documentation: "Explicitly disclose witness-derived data",
           range,
         },
-        {
-          label: "Boolean",
-          kind: monaco.languages.CompletionItemKind.TypeParameter,
-          insertText: "Boolean",
-          documentation: "Boolean type",
-          range,
-        },
-      ];
+      );
 
-      return { suggestions: snippets };
+      return { suggestions };
     },
   });
 
-  // Hover provider
   monaco.languages.registerHoverProvider("compact", {
     provideHover: (model, position) => {
       const word = model.getWordAtPosition(position);
       if (!word) return null;
 
-      const docs: Record<string, string> = {
-        ledger: "**ledger** — Stores public state on the blockchain. All ledger variables are publicly visible.",
-        witness: "**witness** — Private input to a circuit. Never exposed publicly; used in ZK proofs.",
-        circuit: "**circuit** — A computation unit that can produce a ZK proof. Exported circuits are callable externally.",
-        contract: "**contract** — The top-level smart contract definition.",
-        assert: "**assert** — Enforces a constraint. Violations cause circuit failure and transaction rejection.",
-        hash: "**hash(...)** — Cryptographic hash function. Used for commitments and proofs.",
-        pragma: "**pragma** — Compiler directive. Specifies minimum language version.",
-        Uint: `**Uint<N>** — Unsigned integer with N-bit precision. Common sizes: 32, 64, 128.`,
-        Bytes: "**Bytes<N>** — Fixed-length byte array. Used for hashes, addresses, and commitments.",
-        Boolean: "**Boolean** — True or false value.",
-      };
-
-      const doc = docs[word.word];
-      if (!doc) return null;
+      const code = model.getValue();
+      const doc = hoverDocForWord(code, word.word);
+      const extra = lookupSymbol(code, word.word)?.line
+        ? "\n\n_Go to definition (F12) · Find references (⇧F12)_"
+        : "";
+      if (!doc) {
+        const line = model.getLineContent(position.lineNumber);
+        const enumDot = line.slice(0, position.column - 1).match(/(\w+)\.(\w*)$/);
+        if (enumDot) {
+          const full = `${enumDot[1]}.${word.word}`;
+          const fullDoc = hoverDocForWord(code, full);
+          if (fullDoc) {
+            return {
+              range: new monaco.Range(
+                position.lineNumber,
+                word.startColumn,
+                position.lineNumber,
+                word.endColumn,
+              ),
+              contents: [{ value: fullDoc }],
+            };
+          }
+        }
+        return null;
+      }
 
       return {
         range: new monaco.Range(
           position.lineNumber,
           word.startColumn,
           position.lineNumber,
-          word.endColumn
+          word.endColumn,
         ),
-        contents: [{ value: doc }],
+        contents: [{ value: doc + extra }],
       };
     },
   });
+
+  registerCompactLanguageService(monaco);
 }

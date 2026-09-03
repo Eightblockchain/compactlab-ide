@@ -1,22 +1,37 @@
 "use client";
 
-import { useRef, useEffect, useCallback } from "react";
+import { useRef, useEffect, useCallback, useState } from "react";
 import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
+import type * as Monaco from "monaco-editor";
 import { useIDEStore } from "@/store/ide";
 import { compileCompact, makeLog } from "@/lib/compact";
+import { applyDiagnosticsToModel } from "@/lib/compact-diagnostics";
+import { compactEditorBridge } from "@/lib/compact-editor-bridge";
+import { analyzePrivacy, type PrivacyKind } from "@/lib/compact-privacy";
 import { registerCompactLanguage } from "./compact-language";
 import { EditorTabBar } from "./EditorTabBar";
 
 let saveTimeout: ReturnType<typeof setTimeout> | null = null;
+let typecheckTimeout: ReturnType<typeof setTimeout> | null = null;
+let typecheckGeneration = 0;
+
+const TYPECHECK_DEBOUNCE_MS = 1500;
 
 export function CompactEditor() {
-  const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
+  const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
+  const monacoRef = useRef<typeof Monaco | null>(null);
+  const privacyDecosRef = useRef<string[]>([]);
+  const lastTypecheckErrorsRef = useRef<{ code: string; errors: NonNullable<import("@/lib/compact").CompileResult["errors"]> } | null>(null);
+
+  const [typecheckStatus, setTypecheckStatus] = useState<"idle" | "checking">("idle");
+
   const {
     code,
     setCode,
     saveProject,
     activeFile,
     status,
+    compileResult,
     addLog,
     setCompileResult,
     setStatus,
@@ -24,9 +39,120 @@ export function CompactEditor() {
     setBottomPanelOpen,
     clearLogs,
     upsertGeneratedFiles,
+    activeProject,
+    rightPanelTab,
   } = useIDEStore();
 
+  const isCompactFile = (activeFile?.language ?? "compact") === "compact";
+
+  const refreshMarkers = useCallback(
+    (sourceCode: string, serverErrors?: import("@/lib/compact").CompileError[]) => {
+      const editor = editorRef.current;
+      const monaco = monacoRef.current;
+      if (!editor || !monaco || !isCompactFile) return;
+      const model = editor.getModel();
+      applyDiagnosticsToModel(monaco, model, sourceCode, serverErrors);
+    },
+    [isCompactFile],
+  );
+
+  const runSilentTypecheck = useCallback(
+    async (sourceCode: string, generation: number) => {
+      if (!isCompactFile) return;
+
+      setTypecheckStatus("checking");
+      const result = await compileCompact(sourceCode, {
+        projectId: activeProject?.id,
+        zk: false,
+      });
+
+      if (generation !== typecheckGeneration) return;
+
+      lastTypecheckErrorsRef.current = {
+        code: sourceCode,
+        errors: result.errors ?? [],
+      };
+
+      if (!result.success && result.errors?.length) {
+        refreshMarkers(sourceCode, result.errors);
+      } else if (result.success) {
+        refreshMarkers(sourceCode, []);
+      }
+
+      setTypecheckStatus("idle");
+    },
+    [activeProject?.id, isCompactFile, refreshMarkers],
+  );
+
+  const scheduleTypecheck = useCallback(
+    (sourceCode: string) => {
+      if (!isCompactFile) return;
+      if (typecheckTimeout) clearTimeout(typecheckTimeout);
+      typecheckGeneration += 1;
+      const gen = typecheckGeneration;
+
+      refreshMarkers(sourceCode, lastTypecheckErrorsRef.current?.code === sourceCode
+        ? lastTypecheckErrorsRef.current.errors
+        : undefined);
+
+      typecheckTimeout = setTimeout(() => {
+        if (useIDEStore.getState().status !== "idle") return;
+        void runSilentTypecheck(sourceCode, gen);
+      }, TYPECHECK_DEBOUNCE_MS);
+    },
+    [isCompactFile, refreshMarkers, runSilentTypecheck],
+  );
+
+  useEffect(() => {
+    if (!isCompactFile) return;
+    const serverErrors =
+      compileResult && !compileResult.success
+        ? compileResult.errors
+        : compileResult?.success
+          ? []
+          : lastTypecheckErrorsRef.current?.code === code
+            ? lastTypecheckErrorsRef.current.errors
+            : undefined;
+    refreshMarkers(code, serverErrors);
+  }, [compileResult, code, isCompactFile, refreshMarkers]);
+
+  useEffect(() => {
+    const editor = editorRef.current;
+    const monaco = monacoRef.current;
+    if (!editor || !monaco || !isCompactFile) return;
+    const model = editor.getModel();
+    if (!model) return;
+
+    if (rightPanelTab !== "privacy") {
+      privacyDecosRef.current = editor.deltaDecorations(privacyDecosRef.current, []);
+      return;
+    }
+
+    const CLASS: Record<PrivacyKind, string> = {
+      private: "compact-privacy-private",
+      public: "compact-privacy-public",
+      disclose: "compact-privacy-disclose",
+      hash: "compact-privacy-hash",
+    };
+    const seen = new Set<string>();
+    const decorations: Monaco.editor.IModelDeltaDecoration[] = [];
+    for (const span of analyzePrivacy(code).spans) {
+      const key = `${span.kind}:${span.line}:${span.column}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      decorations.push({
+        range: new monaco.Range(span.line, span.column, span.line, span.endColumn),
+        options: {
+          inlineClassName: CLASS[span.kind],
+          hoverMessage: { value: span.note },
+        },
+      });
+    }
+    privacyDecosRef.current = editor.deltaDecorations(privacyDecosRef.current, decorations);
+  }, [code, isCompactFile, rightPanelTab]);
+
   const handleBeforeMount: BeforeMount = (monaco) => {
+    monacoRef.current = monaco;
     registerCompactLanguage(monaco);
   };
 
@@ -102,6 +228,7 @@ export function CompactEditor() {
       if (result.generatedFiles && result.generatedFiles.length > 0) {
         upsertGeneratedFiles(result.generatedFiles);
       }
+      lastTypecheckErrorsRef.current = { code: compileCode, errors: [] };
     } else {
       const errorCount = result.errors?.length ?? 0;
       addLog(makeLog("error", `Compilation failed: ${errorCount} error${errorCount !== 1 ? "s" : ""}`, "compiler"));
@@ -111,10 +238,12 @@ export function CompactEditor() {
       if (result.installHint) {
         addLog(makeLog("info", result.installHint, "compiler"));
       }
+      lastTypecheckErrorsRef.current = { code: compileCode, errors: result.errors ?? [] };
     }
 
     setCompileResult(result);
     setStatus("idle");
+    refreshMarkers(compileCode, result.errors);
   }, [
     clearLogs,
     setLogTab,
@@ -124,44 +253,60 @@ export function CompactEditor() {
     addLog,
     upsertGeneratedFiles,
     setCode,
+    refreshMarkers,
   ]);
 
   const handleEditorMount: OnMount = (editor, monacoInstance) => {
     editorRef.current = editor;
+    monacoRef.current = monacoInstance;
+    compactEditorBridge.register(editor, monacoInstance);
 
-    editor.addCommand(
-      monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.KeyS,
-      () => {
-        saveProject();
-      },
-    );
+    editor.addCommand(monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.KeyS, () => {
+      saveProject();
+    });
 
-    editor.addCommand(
-      monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.Enter,
-      () => {
-        void runCompile();
-      },
-    );
+    editor.addCommand(monacoInstance.KeyMod.CtrlCmd | monacoInstance.KeyCode.Enter, () => {
+      void runCompile();
+    });
 
+    refreshMarkers(code);
     editor.focus();
   };
+
+  useEffect(() => {
+    return () => {
+      if (editorRef.current) {
+        compactEditorBridge.unregister(editorRef.current);
+      }
+    };
+  }, []);
 
   const handleChange = useCallback(
     (value: string | undefined) => {
       const newCode = value ?? "";
       setCode(newCode);
+      scheduleTypecheck(newCode);
 
       if (saveTimeout) clearTimeout(saveTimeout);
       saveTimeout = setTimeout(() => {
         saveProject();
       }, 2000);
     },
-    [setCode, saveProject],
+    [setCode, saveProject, scheduleTypecheck],
   );
 
   return (
     <div className="flex flex-col h-full w-full" style={{ background: "#111111" }}>
       <EditorTabBar />
+
+      {isCompactFile && typecheckStatus === "checking" && status === "idle" && (
+        <div
+          className="flex-shrink-0 px-3 py-0.5 text-2xs border-b border-border/50"
+          style={{ color: "#666360", background: "#141414" }}
+        >
+          Typechecking…
+        </div>
+      )}
 
       <div className="flex-1 overflow-hidden relative">
         {status === "compiling" || status === "deploying" ? (
@@ -208,7 +353,7 @@ export function CompactEditor() {
               horizontalScrollbarSize: 4,
             },
             lineNumbers: "on",
-            glyphMargin: false,
+            glyphMargin: true,
             folding: true,
             foldingHighlight: false,
             renderLineHighlight: "all",
@@ -231,15 +376,14 @@ export function CompactEditor() {
               bracketPairs: false,
               indentation: true,
             },
-            overviewRulerLanes: 0,
-            hideCursorInOverviewRuler: true,
+            overviewRulerLanes: 3,
+            hideCursorInOverviewRuler: false,
             stickyScroll: { enabled: false },
             formatOnPaste: true,
-            contextmenu: false,
+            contextmenu: true,
           }}
         />
       </div>
-      {/* Keep deps for compile shortcut */}
     </div>
   );
 }

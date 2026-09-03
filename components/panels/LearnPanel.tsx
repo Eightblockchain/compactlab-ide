@@ -24,17 +24,12 @@ export function LearnPanel() {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex-shrink-0 p-4 border-b border-border space-y-3">
-        <div>
-          <h2 className="text-sm font-semibold text-text-primary">Learn Midnight</h2>
-          <p className="mt-1 text-xs text-text-secondary leading-relaxed">
-            Concepts, explanations, and examples from Midnight Compact docs - for when you are stuck
-            building. CompactLab targets language{" "}
-            <span className="font-mono text-text-primary">{COMPACT_LANGUAGE_VERSION}</span> with
-            compiler{" "}
-            <span className="font-mono text-text-primary">+{COMPACT_COMPILER_PACKAGE}</span>.
-          </p>
-        </div>
+      <div className="flex-shrink-0 px-3 pt-1 pb-3 border-b border-border space-y-2">
+        <p className="text-xs text-text-secondary leading-relaxed">
+          Concepts and examples from Midnight Compact docs — language{" "}
+          <span className="font-mono text-text-primary">{COMPACT_LANGUAGE_VERSION}</span>, compiler{" "}
+          <span className="font-mono text-text-primary">+{COMPACT_COMPILER_PACKAGE}</span>.
+        </p>
         <div className="flex flex-wrap gap-1.5">
           <a
             href={LEARN_DOCS_HOME}
