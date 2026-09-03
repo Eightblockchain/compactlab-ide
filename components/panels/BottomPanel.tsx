@@ -6,16 +6,30 @@ import { Tabs, Badge, Button, IconButton, StatusDot } from "@/components/ui";
 import { cn, formatTimestamp } from "@/lib/utils";
 import type { LogEntry } from "@/lib/compact";
 import type { LogTab } from "@/store/ide";
+import { compactEditorBridge } from "@/lib/compact-editor-bridge";
 import { oneAmContractUrl, oneAmTxUrl } from "@/lib/explorers";
+import { lintCompactSource } from "@/lib/compact-lint";
 import { useLaceWallet } from "@/hooks/useLaceWallet";
 import { ZkArtifactsPanel } from "@/components/panels/ZkArtifactsPanel";
+import { SPONSORED_FEES_ENABLED } from "@/lib/fee-mode";
 
 export function BottomPanel() {
-  const { logTab, setLogTab, bottomPanelOpen, setBottomPanelOpen, logs, clearLogs } = useIDEStore();
+  const { logTab, setLogTab, bottomPanelOpen, setBottomPanelOpen, logs, clearLogs, code, activeFile, compileResult } = useIDEStore();
+
+  const lintCount =
+    activeFile?.language === "compact"
+      ? lintCompactSource(code).filter((d) => d.severity === "error").length
+      : 0;
+  const compileErrorCount = compileResult?.errors?.length ?? 0;
+  const problemCount = compileErrorCount || lintCount;
 
   const tabs = [
     { id: "logs", label: "Logs", badge: logs.length > 0 ? logs.length : undefined },
-    { id: "compile", label: "Compile" },
+    {
+      id: "compile",
+      label: "Compile",
+      badge: problemCount > 0 ? problemCount : undefined,
+    },
     { id: "network", label: "Network" },
   ];
 
@@ -139,7 +153,10 @@ function LogLine({ log, index }: { log: LogEntry; index: number }) {
 // ─── Compile Panel ────────────────────────────────────────────────────────────
 
 function CompilePanel() {
-  const { compileResult, status } = useIDEStore();
+  const { compileResult, status, setLogTab, code, activeFile } = useIDEStore();
+  const lintIssues =
+    activeFile?.language === "compact" ? lintCompactSource(code) : [];
+  const showLintOnly = lintIssues.length > 0 && !compileResult && status !== "compiling";
 
   return (
     <div className="h-full overflow-y-auto p-4 space-y-4">
@@ -153,7 +170,42 @@ function CompilePanel() {
         </div>
       )}
 
-      {!compileResult && status !== "compiling" && <EmptyTerminal message="Run the compiler to see output." />}
+      {!compileResult && status !== "compiling" && !showLintOnly && (
+        <EmptyTerminal message="Run the compiler to see output. Editor shows inline hints as you type." />
+      )}
+
+      {showLintOnly && (
+        <div>
+          <p className="text-2xs text-warning uppercase tracking-wide font-semibold mb-2">
+            Editor checks ({lintIssues.length})
+          </p>
+          <div className="space-y-1">
+            {lintIssues.map((issue, i) => (
+              <button
+                key={i}
+                type="button"
+                onClick={() => compactEditorBridge.jumpTo(issue.line, issue.column)}
+                className={cn(
+                  "flex items-start gap-2 p-2 rounded text-xs w-full text-left transition-colors cursor-pointer border",
+                  issue.severity === "error"
+                    ? "bg-error/5 border-error/15 hover:bg-error/10"
+                    : "bg-warning/5 border-warning/15 hover:bg-warning/10",
+                )}
+              >
+                <span
+                  className={cn(
+                    "flex-shrink-0 font-mono",
+                    issue.severity === "error" ? "text-error" : "text-warning",
+                  )}
+                >
+                  Line {issue.line}:{issue.column}
+                </span>
+                <span className="text-text-secondary">{issue.message}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {compileResult && (
         <div className="space-y-4">
@@ -251,10 +303,18 @@ function CompilePanel() {
               <p className="text-2xs text-error uppercase tracking-wide font-semibold mb-2">Errors</p>
               <div className="space-y-1">
                 {compileResult.errors.map((err, i) => (
-                  <div key={i} className="flex items-start gap-2 p-2 bg-error/5 border border-error/15 rounded text-xs">
-                    <span className="text-error flex-shrink-0">Line {err.line}:{err.column}</span>
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => {
+                      compactEditorBridge.jumpTo(err.line, err.column);
+                      setLogTab("compile");
+                    }}
+                    className="flex items-start gap-2 p-2 bg-error/5 border border-error/15 rounded text-xs w-full text-left hover:bg-error/10 transition-colors cursor-pointer"
+                  >
+                    <span className="text-error flex-shrink-0 font-mono">Line {err.line}:{err.column}</span>
                     <span className="text-text-secondary">{err.message}</span>
-                  </div>
+                  </button>
                 ))}
               </div>
             </div>
@@ -280,7 +340,7 @@ function CompilePanel() {
 // ─── Network Panel ────────────────────────────────────────────────────────────
 
 function NetworkPanel() {
-  const { wallet, deployResult, status } = useIDEStore();
+  const { wallet, deployResult, status, feeMode, sponsorStatus, setDeployResult } = useIDEStore();
   const lace = useLaceWallet();
   const dustEmpty = lace.dustBalance?.isEmpty === true;
   const dustUnknown = wallet.connected && !lace.dustBalance && wallet.balance === "Loading…";
@@ -291,6 +351,49 @@ function NetworkPanel() {
       <div>
         <p className="text-2xs text-text-muted uppercase tracking-wide font-semibold mb-2">Wallet</p>
         <div className="p-3 bg-surface-2 border border-border rounded-md space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-text-muted">Fee mode</span>
+            <span className="text-xs text-text-primary">
+              {SPONSORED_FEES_ENABLED && feeMode === "sponsored" ? "Sponsored" : "Self-pay"}
+            </span>
+          </div>
+          {SPONSORED_FEES_ENABLED && feeMode === "sponsored" && (
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-text-muted">Sponsor</span>
+                <span
+                  className={cn(
+                    "text-xs",
+                    sponsorStatus?.healthy
+                      ? "text-success"
+                      : sponsorStatus?.syncing
+                        ? "text-text-secondary"
+                        : "text-warning",
+                  )}
+                  title={sponsorStatus?.reason ?? undefined}
+                >
+                  {!sponsorStatus
+                    ? "Checking…"
+                    : sponsorStatus.healthy
+                      ? "Healthy"
+                      : sponsorStatus.syncing
+                        ? "Syncing…"
+                        : sponsorStatus.reason || "Unavailable"}
+                </span>
+              </div>
+              {sponsorStatus?.unshieldedAddress && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-text-muted">Sponsor addr</span>
+                  <span
+                    className="text-xs font-mono text-text-secondary truncate max-w-[60%]"
+                    title={sponsorStatus.unshieldedAddress}
+                  >
+                    {sponsorStatus.unshieldedAddress}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
           <div className="flex items-center justify-between">
             <span className="text-xs text-text-muted">Status</span>
             <StatusDot
@@ -336,7 +439,7 @@ function NetworkPanel() {
               {(dustEmpty || dustUnknown) && (
                 <p className="text-2xs text-warning leading-relaxed pt-1 border-t border-border/60">
                   {dustEmpty
-                    ? "tDUST is 0. Fund tNIGHT from the faucet, then wait for Dust to generate before Deploy."
+                    ? "tDUST is 0. Fund tNIGHT from the faucet and wait for Dust generation before Deploy or Call."
                     : "Could not read Dust yet. Click refresh or reconnect 1AM."}
                   {" "}
                   <a
@@ -395,10 +498,26 @@ function NetworkPanel() {
             <div className="flex items-center gap-2">
               <StatusDot status={deployResult.success ? "success" : "error"} />
               <span className={cn("text-sm font-medium", deployResult.success ? "text-success" : "text-error")}>
-                {deployResult.success ? "Deployed successfully" : "Deployment failed"}
+                {deployResult.success ? "Deployed successfully" : "Last deploy attempt failed"}
               </span>
               <span className="ml-auto text-xs text-text-muted">{deployResult.duration}ms</span>
+              {!deployResult.success && (
+                <button
+                  type="button"
+                  onClick={() => setDeployResult(null)}
+                  className="text-2xs text-text-muted hover:text-text-primary"
+                >
+                  Dismiss
+                </button>
+              )}
             </div>
+
+            {!deployResult.success && (
+              <p className="text-2xs text-text-muted leading-relaxed">
+                This is a saved result from an earlier Deploy, not from connecting your wallet.
+                Connecting 1AM does not submit a deploy transaction.
+              </p>
+            )}
 
             {!deployResult.success && deployResult.error && (
               <div className="mt-1 p-2 bg-error/5 border border-error/15 rounded text-xs font-mono text-error/90 break-all select-text">

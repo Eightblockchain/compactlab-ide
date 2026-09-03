@@ -4,7 +4,7 @@ import { generateId, slugify } from "@/lib/utils";
 import { COMPACT_TEMPLATES, PROJECT_BASE_FOLDERS, PROJECT_TSCONFIG, PROJECT_PROVIDERS_TS, PROJECT_DEPLOYMENT_JSON, buildPackageJson } from "@/lib/constants";
 import { COMPACT_STABLE_VERSION } from "@/lib/version";
 import type { CompactVersion } from "@/lib/version";
-import type { CompileResult, SimulateResult, DeployResult, LogEntry } from "@/lib/compact";
+import type { CompileResult, DeployResult, LogEntry } from "@/lib/compact";
 import { fingerprintSource } from "@/lib/deploy-gate";
 import {
   createCloudProject,
@@ -16,10 +16,17 @@ import {
   syncProjectNow,
 } from "@/lib/project-sync";
 import { makeLog } from "@/lib/compact";
+import {
+  DEFAULT_FEE_MODE,
+  normalizeFeeMode,
+  type FeeMode,
+  type SponsorStatusResponse,
+} from "@/lib/fee-mode";
 
-export type IDEStatus = "idle" | "compiling" | "simulating" | "deploying" | "saving";
-export type PanelTab = "contract-ui" | "source-scan" | "learn";
+export type IDEStatus = "idle" | "compiling" | "deploying" | "saving";
+export type PanelTab = "contract-ui" | "source-scan" | "privacy" | "learn";
 export type LogTab = "logs" | "compile" | "network";
+export type { FeeMode };
 
 // ─── Domain types ──────────────────────────────────────────────────────────────
 
@@ -56,6 +63,8 @@ export interface Project {
   deployResult?: DeployResult | null;
   /** User-supplied private witness values (name → string form). Persisted per project. */
   witnessValues?: Record<string, string>;
+  /** User-supplied Compact constructor argument values. Persisted per project. */
+  constructorValues?: Record<string, string>;
   /** Base URL for full-ZK compile artifacts (e.g. /contracts/managed/<id>) */
   artifactBaseUrl?: string | null;
   /** Fingerprint of .compact source at last successful full ZK compile */
@@ -94,14 +103,19 @@ export interface IDEStore {
   // Wallet
   wallet: WalletState;
 
+  /** Deploy/Call fee payment. v1 public default is self-pay. */
+  feeMode: FeeMode;
+  /** Last known CompactLab sponsor health (from GET /v1/sponsor/status). */
+  sponsorStatus: SponsorStatusResponse | null;
+
   // Results
   compileResult: CompileResult | null;
-  simulateResult: SimulateResult | null;
-  simulateInputs: Record<string, string>;
   activeCircuit: string | null;
   deployResult: DeployResult | null;
   /** Active project's witness input map (synced onto Project). */
   witnessValues: Record<string, string>;
+  /** Active project's constructor arg map (synced onto Project). */
+  constructorValues: Record<string, string>;
 
   // Logs & panels
   logs: LogEntry[];
@@ -157,11 +171,11 @@ export interface IDEStore {
   // Actions — IDE
   setStatus: (status: IDEStatus) => void;
   setCompileResult: (result: CompileResult | null) => void;
-  setSimulateResult: (result: SimulateResult | null) => void;
   setDeployResult: (result: DeployResult | null) => void;
   setWitnessValue: (name: string, value: string) => void;
   setWitnessValues: (values: Record<string, string>) => void;
-  setSimulateInputs: (inputs: Record<string, string>) => void;
+  setConstructorValue: (name: string, value: string) => void;
+  setConstructorValues: (values: Record<string, string>) => void;
   setActiveCircuit: (circuit: string | null) => void;
 
   // Actions — logs
@@ -170,6 +184,8 @@ export interface IDEStore {
 
   // Actions — wallet (real connect lives in useMidnightWallet; this syncs UI state)
   setWalletState: (wallet: WalletState) => void;
+  setFeeMode: (mode: FeeMode) => void;
+  setSponsorStatus: (status: SponsorStatusResponse | null) => void;
 
   // Actions — UI
   setRightPanelTab: (tab: PanelTab) => void;
@@ -285,13 +301,14 @@ export const useIDEStore = create<IDEStore>()(
         dustCap: null,
         network: "Midnight Preprod",
       },
+      feeMode: DEFAULT_FEE_MODE,
+      sponsorStatus: null,
 
       compileResult: null,
-      simulateResult: null,
-      simulateInputs: {},
       activeCircuit: null,
       deployResult: null,
       witnessValues: {},
+      constructorValues: {},
 
       logs: [],
       rightPanelTab: "contract-ui",
@@ -337,9 +354,9 @@ export const useIDEStore = create<IDEStore>()(
           isDirty: false,
           saveStatus: "saved",
           compileResult: null,
-          simulateResult: null,
           deployResult: null,
           witnessValues: {},
+          constructorValues: {},
           isNewProjectModalOpen: false,
           openTabIds: file ? [file.id] : [],
           tabBuffers: {},
@@ -420,9 +437,9 @@ export const useIDEStore = create<IDEStore>()(
           isDirty: false,
           saveStatus: "saved",
           compileResult: opened.compileResult ?? null,
-          simulateResult: null,
-          deployResult: opened.deployResult ?? null,
+          deployResult: opened.deployResult?.success ? opened.deployResult : null,
           witnessValues: opened.witnessValues ?? {},
+          constructorValues: opened.constructorValues ?? {},
           logs: [],
           openTabIds: file ? [file.id] : [],
           tabBuffers: {},
@@ -925,8 +942,9 @@ export const useIDEStore = create<IDEStore>()(
             activeFile: nextFile,
             code: nextFile?.content ?? "",
             compileResult: next?.compileResult ?? null,
-            deployResult: next?.deployResult ?? null,
+            deployResult: next?.deployResult?.success ? next.deployResult : null,
             witnessValues: next?.witnessValues ?? {},
+            constructorValues: next?.constructorValues ?? {},
             openTabIds: nextFile ? [nextFile.id] : [],
             tabBuffers: {},
           });
@@ -1000,8 +1018,9 @@ export const useIDEStore = create<IDEStore>()(
             activeFile: file,
             code: file?.content ?? "",
             compileResult: preferred?.compileResult ?? null,
-            deployResult: preferred?.deployResult ?? null,
+            deployResult: preferred?.deployResult?.success ? preferred.deployResult : null,
             witnessValues: preferred?.witnessValues ?? {},
+            constructorValues: preferred?.constructorValues ?? {},
             openTabIds: file ? [file.id] : [],
             tabBuffers: {},
             projectsHydrated: true,
@@ -1107,6 +1126,7 @@ export const useIDEStore = create<IDEStore>()(
           compileResult: null,
           deployResult: null,
           witnessValues: {},
+          constructorValues: {},
           openTabIds: [],
           tabBuffers: {},
           projectsHydrated: false,
@@ -1163,8 +1183,13 @@ export const useIDEStore = create<IDEStore>()(
           set({ compileResult });
         }
       },
-      setSimulateResult: (simulateResult) => set({ simulateResult }),
       setDeployResult: (deployResult) => {
+        // Failures are session-only. Do not persist them on the project — otherwise
+        // Connect 1AM (which opens the Network panel) looks like a new failed Deploy.
+        if (!deployResult?.success) {
+          set({ deployResult });
+          return;
+        }
         const { activeProjectId, activeProject, projects, activeFileId, activeFile, tabBuffers } =
           get();
         if (activeProjectId && activeProject) {
@@ -1173,7 +1198,7 @@ export const useIDEStore = create<IDEStore>()(
           let nextCode: string | undefined;
           let nextActiveFile = activeFile;
 
-          if (deployResult?.success) {
+          if (deployResult.success) {
             const payload = JSON.stringify(
               {
                 network: "preprod",
@@ -1269,7 +1294,35 @@ export const useIDEStore = create<IDEStore>()(
           set({ witnessValues: next });
         }
       },
-      setSimulateInputs: (simulateInputs) => set({ simulateInputs }),
+      setConstructorValue: (name, value) => {
+        const { activeProjectId, activeProject, projects, constructorValues } = get();
+        const next = { ...constructorValues, [name]: value };
+        if (activeProjectId && activeProject) {
+          const updated = { ...activeProject, constructorValues: next, updatedAt: Date.now() };
+          set({
+            constructorValues: next,
+            activeProject: updated,
+            projects: projects.map((p) => (p.id === activeProjectId ? updated : p)),
+          });
+          scheduleProjectSync(updated);
+        } else {
+          set({ constructorValues: next });
+        }
+      },
+      setConstructorValues: (next) => {
+        const { activeProjectId, activeProject, projects } = get();
+        if (activeProjectId && activeProject) {
+          const updated = { ...activeProject, constructorValues: next, updatedAt: Date.now() };
+          set({
+            constructorValues: next,
+            activeProject: updated,
+            projects: projects.map((p) => (p.id === activeProjectId ? updated : p)),
+          });
+          scheduleProjectSync(updated);
+        } else {
+          set({ constructorValues: next });
+        }
+      },
       setActiveCircuit: (activeCircuit) => set({ activeCircuit }),
 
       addLog: (log) =>
@@ -1277,6 +1330,8 @@ export const useIDEStore = create<IDEStore>()(
       clearLogs: () => set({ logs: [] }),
 
       setWalletState: (wallet) => set({ wallet }),
+      setFeeMode: (feeMode) => set({ feeMode: normalizeFeeMode(feeMode) }),
+      setSponsorStatus: (sponsorStatus) => set({ sponsorStatus }),
 
       setRightPanelTab: (rightPanelTab) => set({ rightPanelTab }),
       setLogTab: (logTab) => set({ logTab }),
@@ -1289,18 +1344,17 @@ export const useIDEStore = create<IDEStore>()(
       clearSidebarReveal: () => set({ sidebarRevealFolderIds: [] }),
     }),
     {
-      name: "compactlab-v6",
-      version: 6,
+      name: "compactlab-v7",
+      version: 7,
       migrate: (persistedState, fromVersion) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const state = persistedState as any;
         if (
-          state?.rightPanelTab === "simulation" ||
-          state?.rightPanelTab === "privacy" ||
-          (state?.rightPanelTab &&
-            state.rightPanelTab !== "contract-ui" &&
-            state.rightPanelTab !== "source-scan" &&
-            state.rightPanelTab !== "learn")
+          state?.rightPanelTab &&
+          state.rightPanelTab !== "contract-ui" &&
+          state.rightPanelTab !== "source-scan" &&
+          state.rightPanelTab !== "learn" &&
+          state.rightPanelTab !== "privacy"
         ) {
           state.rightPanelTab = "contract-ui";
         }
@@ -1310,6 +1364,7 @@ export const useIDEStore = create<IDEStore>()(
           state.activeProjectId = null;
           state.openTabIds = [];
         }
+        state.feeMode = normalizeFeeMode(state.feeMode);
         return persistedState as any;
       },
       partialize: (state) => ({
@@ -1320,11 +1375,14 @@ export const useIDEStore = create<IDEStore>()(
         sidebarOpen: state.sidebarOpen,
         bottomPanelOpen: state.bottomPanelOpen,
         rightPanelTab: state.rightPanelTab,
+        feeMode: state.feeMode,
       }),
       onRehydrateStorage: () => (state) => {
         if (!state) return;
         state.compactVersion = COMPACT_STABLE_VERSION;
         state.projectsHydrated = false;
+        // Persisted "sponsored" must not survive when the flag is off.
+        state.feeMode = normalizeFeeMode(state.feeMode);
         const proj = state.projects?.find(
           (p) => p.id === state.activeProjectId
         );
@@ -1338,8 +1396,9 @@ export const useIDEStore = create<IDEStore>()(
           state.activeFile = file ?? null;
           state.code = file?.content ?? "";
           state.compileResult = proj.compileResult ?? null;
-          state.deployResult = proj.deployResult ?? null;
+          state.deployResult = proj.deployResult?.success ? proj.deployResult : null;
           state.witnessValues = proj.witnessValues ?? {};
+          state.constructorValues = proj.constructorValues ?? {};
           const validFileIds = new Set(proj.files?.map((f) => f.id) ?? []);
           const restoredTabs = (state.openTabIds ?? []).filter((id) => validFileIds.has(id));
           state.openTabIds = restoredTabs.length > 0 ? restoredTabs : (file ? [file.id] : []);
@@ -1352,6 +1411,7 @@ export const useIDEStore = create<IDEStore>()(
           state.compileResult = null;
           state.deployResult = null;
           state.witnessValues = {};
+          state.constructorValues = {};
           state.openTabIds = [];
         }
       },

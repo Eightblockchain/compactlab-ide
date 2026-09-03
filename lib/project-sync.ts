@@ -41,6 +41,7 @@ export function cloudToProject(c: CloudProject): Project {
     compileResult: (c.compileResult as CompileResult | null) ?? null,
     deployResult,
     witnessValues: c.witnessValues ?? {},
+    constructorValues: c.constructorValues ?? {},
     artifactBaseUrl: c.artifactBaseUrl,
     compiledSourceHash: c.compiledSourceHash,
   };
@@ -63,6 +64,7 @@ export function projectToUpsert(p: Project): CloudProjectUpsert {
     deployBlockNumber: p.deployResult?.blockNumber ?? null,
     deployResult: p.deployResult ?? null,
     witnessValues: p.witnessValues ?? {},
+    constructorValues: p.constructorValues ?? {},
     compileResult: p.compileResult ?? null,
   };
 }

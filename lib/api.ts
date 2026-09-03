@@ -170,6 +170,7 @@ export type CloudProject = {
   deployBlockNumber: number | null;
   deployResult: unknown | null;
   witnessValues: Record<string, string>;
+  constructorValues: Record<string, string>;
   compileResult: unknown | null;
   createdAt: number;
   updatedAt: number;
@@ -191,6 +192,7 @@ export type CloudProjectUpsert = {
   deployBlockNumber?: number | null;
   deployResult?: unknown | null;
   witnessValues?: Record<string, string>;
+  constructorValues?: Record<string, string>;
   compileResult?: unknown | null;
 };
 
@@ -204,6 +206,7 @@ export type CloudProjectPatch = Partial<{
   artifactBaseUrl: string | null;
   compiledSourceHash: string | null;
   witnessValues: Record<string, string> | null;
+  constructorValues: Record<string, string> | null;
   compileResult: unknown | null;
   contractAddress: string | null;
   deployTxHash: string | null;

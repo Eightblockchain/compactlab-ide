@@ -171,10 +171,20 @@ body {
   animation: fade-in 0.15s ease-out both;
 }
 
-/* Compact syntax highlight helpers */
-.compact-keyword { color: #F06358; }
-.compact-type    { color: #E8AA5B; }
-.compact-string  { color: #95CF98; }
-.compact-comment { color: #636360; font-style: italic; }
-.compact-circuit { color: #D4956A; }
-.compact-witness { color: #eeeeee; }
+/* Compact privacy visualization (editor inline highlights) */
+.compact-privacy-private {
+  background: rgba(212, 168, 83, 0.18);
+  border-bottom: 1px solid rgba(212, 168, 83, 0.55);
+}
+.compact-privacy-public {
+  background: rgba(125, 186, 132, 0.16);
+  border-bottom: 1px solid rgba(125, 186, 132, 0.5);
+}
+.compact-privacy-disclose {
+  background: rgba(240, 99, 88, 0.2);
+  border-bottom: 1px solid rgba(240, 99, 88, 0.65);
+}
+.compact-privacy-hash {
+  background: rgba(149, 207, 152, 0.14);
+  border-bottom: 1px solid rgba(149, 207, 152, 0.45);
+}

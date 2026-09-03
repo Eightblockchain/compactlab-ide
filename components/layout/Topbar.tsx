@@ -3,17 +3,35 @@
 import { useIDEStore } from "@/store/ide";
 import { Button, StatusDot, Divider } from "@/components/ui";
 import { cn, generateId } from "@/lib/utils";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useLaceWallet } from "@/hooks/useLaceWallet";
 import { useAuth } from "@/hooks/useAuth";
 import type { DeployResult } from "@/lib/compact";
 import { compileCompact, makeLog, extractWitnesses } from "@/lib/compact";
-import {
-  deployPlaygroundContract,
-} from "@/lib/playground-deploy";
+import { getConstructorMeta, resolveConstructorParams } from "@/lib/compact-constructor";
+import { typeEnvFromCompactSource, validateCompactParams } from "@/lib/compact-values";
+import { deployPlaygroundContract } from "@/lib/playground-deploy";
 import { getDeployGate, getLiveCompactSource } from "@/lib/deploy-gate";
 import { exportProjectZip, downloadBlob } from "@/lib/project-export";
 import type { UserPublic, Entitlements } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
+import { BILLING_ENABLED } from "@/lib/billing";
+import {
+  SPONSORED_FEES_ENABLED,
+  feeModeHelp,
+  feeModeLabel,
+  type FeeMode,
+  type SponsorStatusResponse,
+} from "@/lib/fee-mode";
+import {
+  SponsorFallbackModal,
+  type SponsorFallbackChoice,
+} from "@/components/modals/SponsorFallbackModal";
+import {
+  DeployProgressModal,
+  type DeployUiStage,
+} from "@/components/modals/DeployProgressModal";
+import { DeployConstructorModal } from "@/components/modals/DeployConstructorModal";
 
 export function Topbar() {
   const {
@@ -35,12 +53,41 @@ export function Topbar() {
     upsertGeneratedFiles,
     setCode,
     witnessValues,
+    constructorValues,
+    setConstructorValues,
+    compileResult,
     activeFileId,
     tabBuffers,
+    feeMode,
+    setFeeMode,
+    sponsorStatus,
+    setSponsorStatus,
+    deployResult,
   } = useIDEStore();
 
   const lace = useLaceWallet();
   const { user, entitlements, logout, checkout, portal } = useAuth();
+  const [deployModalOpen, setDeployModalOpen] = useState(false);
+  const [deployStage, setDeployStage] = useState<DeployUiStage>("connect");
+  const [deployStartedAt, setDeployStartedAt] = useState(0);
+  const [sponsorPrompt, setSponsorPrompt] = useState<{
+    reason: string;
+    syncing: boolean;
+    resolve: (choice: SponsorFallbackChoice) => void;
+  } | null>(null);
+  const [ctorPrompt, setCtorPrompt] = useState<{
+    params: Array<{ name: string; type: string }>;
+    values: Record<string, string>;
+    resolve: (values: Record<string, string> | null) => void;
+  } | null>(null);
+
+  const askSponsorFallback = useCallback(
+    (reason: string, syncing: boolean) =>
+      new Promise<SponsorFallbackChoice>((resolve) => {
+        setSponsorPrompt({ reason, syncing, resolve });
+      }),
+    [],
+  );
 
   useEffect(() => {
     if (lace.status === "connected" && lace.walletInfo) {
@@ -71,6 +118,71 @@ export function Topbar() {
       setBottomPanelOpen(true);
     }
   }, [lace.status, lace.error, addLog, setLogTab, setBottomPanelOpen]);
+
+  // Poll CompactLab sponsor health only when the experimental Sponsored flag is on.
+  useEffect(() => {
+    if (!SPONSORED_FEES_ENABLED || !user) {
+      if (useIDEStore.getState().sponsorStatus !== null) {
+        setSponsorStatus(null);
+      }
+      return;
+    }
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const res = await apiFetch("/v1/sponsor/status");
+        const text = await res.text();
+        let body: SponsorStatusResponse | { error?: string } = {
+          enabled: false,
+          healthy: false,
+          configured: false,
+          dustBalance: null,
+          dustCap: null,
+          reason: "Could not reach sponsor status",
+        };
+        try {
+          body = text
+            ? (JSON.parse(text) as SponsorStatusResponse)
+            : body;
+        } catch {
+          /* keep fallback */
+        }
+        if (cancelled) return;
+        if (!res.ok) {
+          setSponsorStatus({
+            enabled: false,
+            healthy: false,
+            configured: false,
+            dustBalance: null,
+            dustCap: null,
+            reason:
+              (body as { error?: string }).error ||
+              `Sponsor status ${res.status}`,
+          });
+          return;
+        }
+        const status = body as SponsorStatusResponse;
+        setSponsorStatus(status);
+      } catch (err) {
+        if (!cancelled) {
+          setSponsorStatus({
+            enabled: false,
+            healthy: false,
+            configured: false,
+            dustBalance: null,
+            dustCap: null,
+            reason: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+    };
+    void refresh();
+    const id = window.setInterval(() => void refresh(), 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [user, setSponsorStatus]);
 
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState("");
@@ -242,9 +354,65 @@ export function Topbar() {
       return;
     }
 
+    if (!compactSource.trim()) {
+      addLog(makeLog("error", "No Compact contract file (.compact) found in this project.", "network"));
+      return;
+    }
+
+    const witnessSpecs = extractWitnesses(compactSource);
+    const ctorMeta = getConstructorMeta(
+      compactSource,
+      witnessSpecs.map((w) => w.name),
+    );
+    const ctorParamsResolved = resolveConstructorParams({
+      code: compactSource,
+      constructorMetadata: compileResult?.constructorMetadata?.inputs,
+      generatedDts:
+        compileResult?.generatedFiles?.find(
+          (f) => f.path === "contract/index.d.ts" || f.name === "index.d.ts",
+        )?.content ?? null,
+    });
+    const ctorParams =
+      ctorMeta.inputs.length > 0 ? ctorMeta.inputs : ctorParamsResolved;
+    const typeEnv = typeEnvFromCompactSource(compactSource);
+
+    let ctorValues = { ...useIDEStore.getState().constructorValues };
+    if (ctorParams.length > 0) {
+      const filled = await new Promise<Record<string, string> | null>((resolve) => {
+        setCtorPrompt({ params: ctorParams, values: ctorValues, resolve });
+      });
+      if (!filled) {
+        addLog(makeLog("info", "Deploy cancelled — constructor arguments not provided.", "network"));
+        return;
+      }
+      ctorValues = filled;
+      setConstructorValues(filled);
+      addLog(
+        makeLog(
+          "info",
+          `Constructor args: ${ctorParams.map((p) => `${p.name}=${filled[p.name] ?? ""}`).join(", ")}`,
+          "network",
+        ),
+      );
+    }
+
+    const started = Date.now();
+    const failDeploy = (error: string): DeployResult => {
+      addLog(makeLog("error", error, "network"));
+      const outcome: DeployResult = { success: false, duration: Date.now() - started, error };
+      setDeployResult(outcome);
+      setStatus("idle");
+      return outcome;
+    };
+
     clearLogs();
     setBottomPanelOpen(true);
     setLogTab("network");
+    setDeployResult(null);
+    setDeployStartedAt(started);
+    setDeployStage("connect");
+    setDeployModalOpen(true);
+    setStatus("deploying");
 
     if (gate.usingBundled) {
       addLog(
@@ -266,23 +434,22 @@ export function Topbar() {
 
     let connectedAPI = lace.connectedAPI;
     if (!connectedAPI) {
+      setDeployStage("connect");
       addLog(makeLog("info", "Connecting to 1AM wallet…", "network"));
       connectedAPI = await lace.connect();
       if (!connectedAPI) {
-        addLog(
-          makeLog(
-            "error",
-            lace.error ??
-              "Could not connect. CompactLab only supports 1AM (https://1am.xyz/). Install it, unlock it, set Preprod, approve this site, then retry.",
-            "network",
-          ),
+        failDeploy(
+          lace.error ??
+            "Could not connect. CompactLab only supports 1AM (https://1am.xyz/). Install it, unlock it, set Preprod, approve this site, then retry.",
         );
         return;
       }
       addLog(makeLog("success", "1AM connected.", "network"));
     }
 
+    setDeployStage("fees");
     addLog(makeLog("info", "Checking tDUST balance before Deploy…", "network"));
+    let userDustEmpty = false;
     try {
       const dust = await lace.refreshDustBalance();
       if (dust) {
@@ -293,36 +460,110 @@ export function Topbar() {
             "network",
           ),
         );
-        if (dust.isEmpty) {
-          addLog(
-            makeLog(
-              "warn",
-              "tDUST is 0. Fund tNIGHT at https://faucet.preprod.midnight.network/ and wait for Dust generation, then retry Deploy.",
-              "network",
-            ),
-          );
-        }
+        userDustEmpty = dust.isEmpty;
       }
     } catch {
-      /* non-fatal: Deploy may still work if 1AM sponsors fees */
+      /* balance probe is best-effort; Deploy still proceeds if 1AM cannot report it */
     }
 
-    const compactFile = activeProject?.files.find((f) => f.language === "compact");
-    if (!compactFile) {
-      addLog(makeLog("error", "No Compact contract file (.compact) found in this project.", "compiler"));
+    let deployFeeMode = SPONSORED_FEES_ENABLED ? feeMode : "self";
+    if (deployFeeMode === "self" && userDustEmpty) {
+      failDeploy(
+        "Your tDUST balance is 0. Fund tNIGHT at https://faucet.preprod.midnight.network/ , wait for Dust generation, then retry Deploy.",
+      );
       return;
     }
 
-    // Witness *values* are not required at deploy (constructor typically does not
-    // call them). Official bboard seeds a random private state bag for the SDK.
-    // User-supplied values are required later at Call.
-    const witnessSpecs = extractWitnesses(compactFile.content);
+    if (SPONSORED_FEES_ENABLED && deployFeeMode === "sponsored") {
+      let status = sponsorStatus;
+      try {
+        const res = await apiFetch("/v1/sponsor/status");
+        if (res.ok) {
+          status = (await res.json()) as SponsorStatusResponse;
+          setSponsorStatus(status);
+        }
+      } catch {
+        /* keep cached */
+      }
 
-    setStatus("deploying");
+      if (!status?.healthy) {
+        if (!userDustEmpty) {
+          const choice = await askSponsorFallback(
+            status?.reason ??
+              "Sponsor is not healthy yet. You can pay fees yourself with tDUST.",
+            Boolean(status?.syncing),
+          );
+          if (choice === "cancel") {
+            addLog(
+              makeLog(
+                "info",
+                "Deploy cancelled — waiting for Sponsored fees, or try again later.",
+                "network",
+              ),
+            );
+            setDeployModalOpen(false);
+            setStatus("idle");
+            return;
+          }
+          deployFeeMode = "self";
+          setFeeMode("self");
+          addLog(
+            makeLog(
+              "warn",
+              "You chose Self-pay for this Deploy. Topbar switched to Self-pay.",
+              "network",
+            ),
+          );
+        } else {
+          failDeploy(
+            status?.reason
+              ? `Sponsor unavailable: ${status.reason} Your tDUST is also 0 — wait for the sponsor, or fund Self-pay.`
+              : "Sponsor temporarily unavailable and your tDUST is 0; wait or retry later.",
+          );
+          return;
+        }
+      } else {
+        addLog(
+          makeLog(
+            "info",
+            "Sponsor healthy — deploying with CompactLab-sponsored fees.",
+            "network",
+          ),
+        );
+      }
+    }
 
-    let deployResult: DeployResult;
+    const compactFile = activeProject?.files.find((f) => f.language === "compact");
+    if (!compactFile && !compactSource.trim()) {
+      failDeploy("No Compact contract file (.compact) found in this project.");
+      return;
+    }
+
+    const ctorErr = validateCompactParams(
+      ctorParams,
+      ctorValues,
+      "Constructor parameter",
+      typeEnv,
+    );
+    if (ctorErr) {
+      failDeploy(ctorErr);
+      return;
+    }
+    if (ctorMeta.usesWitnesses) {
+      const { validateWitnessValues } = await import("@/lib/playground-witnesses");
+      const wErr = validateWitnessValues(witnessSpecs, witnessValues);
+      if (wErr) {
+        failDeploy(
+          `${wErr.replace("before Call", "before Deploy")} Constructor calls witness(es); set Private witnesses in the Contract panel.`,
+        );
+        setRightPanelTab("contract-ui");
+        return;
+      }
+    }
+
+    let outcome: DeployResult;
     try {
-      deployResult = await deployPlaygroundContract(
+      outcome = await deployPlaygroundContract(
         connectedAPI,
         template,
         addLog,
@@ -331,22 +572,28 @@ export function Topbar() {
           projectId: activeProject?.id,
           witnessSpecs,
           witnessValues,
+          constructorParams: ctorParams,
+          constructorValues: ctorValues,
+          requireWitnessValuesAtDeploy: ctorMeta.usesWitnesses,
+          typeEnv,
+          feeMode: deployFeeMode,
+          onStage: (s) => setDeployStage(s),
         },
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       addLog(makeLog("error", `Deploy failed: ${message}`, "network"));
-      deployResult = { success: false, duration: 0, error: message };
+      outcome = { success: false, duration: Date.now() - started, error: message };
     }
 
-    setDeployResult(deployResult);
+    setDeployResult(outcome);
     setStatus("idle");
-    if (deployResult.success) {
-      setRightPanelTab("contract-ui");
+    setDeployModalOpen(true);
+    if (outcome.success) {
       addLog(
         makeLog(
           "success",
-          "deployment.json updated with contract address. Next: Contract UI → Call a circuit. Proofs take 1-2 min in 1AM.",
+          "deployment.json updated with contract address. Open Contract to send a circuit.",
           "network",
         ),
       );
@@ -434,6 +681,7 @@ export function Topbar() {
   };
 
   return (
+    <>
     <header className="h-14 flex items-center gap-2 px-4 bg-surface border-b border-border flex-shrink-0">
       <div className="flex items-center gap-2 mr-3">
         <div className="w-7 h-7 rounded-md bg-accent flex items-center justify-center flex-shrink-0">
@@ -484,22 +732,66 @@ export function Topbar() {
 
       <div className="flex-1" />
 
-      <div className="hidden md:flex items-center mr-3">
+      <div className="hidden md:flex items-center gap-2 mr-3">
         <span
           className="text-2xs uppercase tracking-wide px-2 py-1 rounded-md border border-border/80 text-text-muted bg-white/[0.02]"
           title="Midnight Preprod. Deploy and Call require the 1AM wallet only."
         >
           Preprod · 1AM
         </span>
+        {SPONSORED_FEES_ENABLED && (
+          <div
+            className="flex items-center rounded-md border border-border/80 bg-white/[0.02] p-0.5"
+            title={feeModeHelp(feeMode)}
+            role="group"
+            aria-label="Fee payment mode"
+          >
+            {(["sponsored", "self"] as FeeMode[]).map((mode) => {
+              const active = feeMode === mode;
+              const sponsoredUnavailable =
+                mode === "sponsored" &&
+                Boolean(sponsorStatus) &&
+                (!sponsorStatus!.enabled ||
+                  (!sponsorStatus!.healthy && !sponsorStatus!.syncing));
+              return (
+                <button
+                  key={mode}
+                  type="button"
+                  disabled={isRunning || (mode === "sponsored" && sponsoredUnavailable)}
+                  onClick={() => {
+                    if (mode === "sponsored" && sponsoredUnavailable) return;
+                    setFeeMode(mode);
+                    addLog(
+                      makeLog(
+                        "info",
+                        `Fee mode set to ${feeModeLabel(mode)}. ${feeModeHelp(mode)}`,
+                        "network",
+                      ),
+                    );
+                  }}
+                  className={cn(
+                    "text-2xs px-2 py-1 rounded transition-colors",
+                    active
+                      ? "bg-accent/20 text-text-primary"
+                      : "text-text-muted hover:text-text-primary",
+                    sponsoredUnavailable && mode === "sponsored" && "opacity-40 cursor-not-allowed",
+                  )}
+                >
+                  {feeModeLabel(mode)}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
 
-      {isRunning && (
+      {isRunning && (status === "compiling" || status === "saving") && (
         <div className="hidden sm:flex items-center gap-1.5 text-xs mr-2">
-          <StepBadge step={1} label="Compile" active={status === "compiling"} done={status === "deploying"} />
+          <StepBadge step={1} label="Compile" active={status === "compiling"} done={false} />
           <div className="w-4 h-px bg-border" />
-          <StepBadge step={2} label="Prove" active={status === "deploying"} />
+          <StepBadge step={2} label="Prove" active={false} />
           <div className="w-4 h-px bg-border" />
-          <StepBadge step={3} label="Submit" active={status === "deploying"} />
+          <StepBadge step={3} label="Submit" active={false} />
         </div>
       )}
 
@@ -610,13 +902,69 @@ export function Topbar() {
           <ProfileMenu
             user={user}
             entitlements={entitlements}
-            onUpgrade={() => void checkout().catch(() => {})}
-            onBilling={() => void portal().catch(() => {})}
+            onUpgrade={BILLING_ENABLED ? () => void checkout().catch(() => {}) : undefined}
+            onBilling={BILLING_ENABLED ? () => void portal().catch(() => {}) : undefined}
             onLogout={() => void logout()}
           />
         )}
       </div>
     </header>
+    <SponsorFallbackModal
+      open={Boolean(sponsorPrompt)}
+      reason={sponsorPrompt?.reason ?? ""}
+      syncing={Boolean(sponsorPrompt?.syncing)}
+      onChoose={(choice) => {
+        const resolve = sponsorPrompt?.resolve;
+        setSponsorPrompt(null);
+        resolve?.(choice);
+      }}
+    />
+    <DeployConstructorModal
+      open={Boolean(ctorPrompt)}
+      params={ctorPrompt?.params ?? []}
+      initialValues={ctorPrompt?.values ?? {}}
+      typeEnv={
+        ctorPrompt
+          ? typeEnvFromCompactSource(
+              getLiveCompactSource({
+                files: activeProject?.files ?? [],
+                activeFileId,
+                code,
+                tabBuffers,
+              }),
+            )
+          : undefined
+      }
+      onCancel={() => {
+        const resolve = ctorPrompt?.resolve;
+        setCtorPrompt(null);
+        resolve?.(null);
+      }}
+      onConfirm={(values) => {
+        const resolve = ctorPrompt?.resolve;
+        setCtorPrompt(null);
+        resolve?.(values);
+      }}
+    />
+    <DeployProgressModal
+      open={deployModalOpen}
+      running={status === "deploying"}
+      stage={deployStage}
+      startedAt={deployStartedAt}
+      projectName={activeProject?.name ?? "Untitled"}
+      result={deployResult}
+      onClose={() => setDeployModalOpen(false)}
+      onOpenContractUi={() => {
+        setRightPanelTab("contract-ui");
+        setDeployModalOpen(false);
+      }}
+      onViewLogs={() => {
+        setLogTab("network");
+        setBottomPanelOpen(true);
+        setDeployModalOpen(false);
+      }}
+    />
+    </>
   );
 }
 
@@ -638,13 +986,17 @@ function ProfileMenu({
 }: {
   user: UserPublic;
   entitlements: Entitlements | null;
-  onUpgrade: () => void;
-  onBilling: () => void;
+  onUpgrade?: () => void;
+  onBilling?: () => void;
   onLogout: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const planLabel = entitlements?.planSlug === "paid" ? "Pro" : "Free";
+  const planLabel = BILLING_ENABLED
+    ? entitlements?.planSlug === "paid"
+      ? "Pro"
+      : "Free"
+    : "Community";
   const displayName = user.name?.trim() || user.email.split("@")[0] || "Account";
 
   useEffect(() => {
@@ -744,7 +1096,7 @@ function ProfileMenu({
               <span>Plan</span>
               <span className="text-text-secondary font-medium">{planLabel}</span>
             </div>
-            {entitlements?.planSlug !== "paid" ? (
+            {BILLING_ENABLED && entitlements?.planSlug !== "paid" && onUpgrade && (
               <button
                 type="button"
                 role="menuitem"
@@ -756,7 +1108,8 @@ function ProfileMenu({
               >
                 Upgrade to Pro
               </button>
-            ) : (
+            )}
+            {BILLING_ENABLED && entitlements?.planSlug === "paid" && onBilling && (
               <button
                 type="button"
                 role="menuitem"
