@@ -1,4 +1,10 @@
 import { generateId } from "./utils";
+import {
+  extractCircuits as scanCircuits,
+  extractLedgerVars as scanLedgerVars,
+  extractWitnesses as scanWitnesses,
+} from "./compact-symbols";
+import { extractConstructorParams } from "./compact-constructor";
 
 export type LogLevel = "info" | "success" | "error" | "warn" | "debug";
 
@@ -15,6 +21,14 @@ export interface CompileResult {
   duration: number;
   constraintCount?: number;
   circuitMetadata?: CircuitMeta[];
+  /** Compact constructor parameters (empty inputs = no-arg constructor). */
+  constructorMetadata?: {
+    inputs: {
+      name: string;
+      type: string;
+      typeSchema?: import("./compact-values").CompactTypeSchema;
+    }[];
+  };
   errors?: CompileError[];
   warnings?: string[];
   mock?: boolean;
@@ -44,7 +58,12 @@ export interface CompileResult {
 
 export interface CircuitMeta {
   name: string;
-  inputs: { name: string; type: string }[];
+  inputs: {
+    name: string;
+    type: string;
+    /** Nested schema from contract-info.json when available. */
+    typeSchema?: import("./compact-values").CompactTypeSchema;
+  }[];
   output: string;
   constraints: number;
   isExported: boolean;
@@ -55,15 +74,6 @@ export interface CompileError {
   column: number;
   message: string;
   severity: "error" | "warning";
-}
-
-export interface SimulateResult {
-  success: boolean;
-  output: unknown;
-  logs: LogEntry[];
-  gasUsed?: number;
-  duration: number;
-  stateChanges?: { key: string; before: string; after: string }[];
 }
 
 export interface DeployResult {
@@ -156,68 +166,35 @@ export async function compileCompact(
 
 // Extract circuits from Compact code (source scan — not a real compiler)
 export function extractCircuits(code: string): CircuitMeta[] {
-  const circuits: CircuitMeta[] = [];
-  const circuitRegex = /export\s+circuit\s+(\w+)\s*\(([^)]*)\)\s*:\s*([^\{]+)/g;
-  let match;
-
-  while ((match = circuitRegex.exec(code)) !== null) {
-    const name = match[1];
-    const paramsStr = match[2].trim();
-    const outputStr = match[3].trim();
-
-    const inputs = paramsStr
-      ? paramsStr.split(",").map((p) => {
-          const parts = p.trim().split(":");
-          return {
-            name: parts[0]?.trim() || "param",
-            type: parts[1]?.trim() || "Uint<32>",
-          };
-        })
-      : [];
-
-    circuits.push({
-      name,
-      inputs,
-      output: outputStr,
-      constraints: 0,
-      isExported: true,
-    });
-  }
-
-  return circuits;
+  return scanCircuits(code).map((c) => ({
+    name: c.name,
+    inputs: c.params ?? [],
+    output: c.type ?? "[]",
+    constraints: 0,
+    isExported: c.isExported ?? false,
+  }));
 }
 
 // Extract ledger variables from code (source scan)
 export function extractLedgerVars(code: string): { name: string; type: string; isPublic: boolean }[] {
-  const vars: { name: string; type: string; isPublic: boolean }[] = [];
-  const ledgerRegex = /(?:export\s+)?(?:sealed\s+)?ledger\s+(\w+)\s*:\s*([^;]+);/g;
-  let match;
-
-  while ((match = ledgerRegex.exec(code)) !== null) {
-    vars.push({
-      name: match[1],
-      type: match[2].trim(),
-      isPublic: true,
-    });
-  }
-
-  return vars;
+  return scanLedgerVars(code).map((v) => ({
+    name: v.name,
+    type: v.type ?? "Unknown",
+    isPublic: true,
+  }));
 }
 
-// Extract witness declarations: `witness foo(): Type;`
+// Extract witnesses from code (source scan)
 export function extractWitnesses(code: string): { name: string; type: string }[] {
-  const witnesses: { name: string; type: string }[] = [];
-  const witnessRegex = /witness\s+(\w+)\s*\([^)]*\)\s*:\s*([^;]+);/g;
-  let match;
+  return scanWitnesses(code).map((w) => ({
+    name: w.name,
+    type: w.type ?? "Unknown",
+  }));
+}
 
-  while ((match = witnessRegex.exec(code)) !== null) {
-    witnesses.push({
-      name: match[1],
-      type: match[2].trim(),
-    });
-  }
-
-  return witnesses;
+/** Extract constructor parameters from Compact source (empty if none / no-arg). */
+export function extractConstructor(code: string): { name: string; type: string }[] {
+  return extractConstructorParams(code);
 }
 
 /** Build a standard log entry. */

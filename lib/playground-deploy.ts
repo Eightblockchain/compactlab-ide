@@ -31,6 +31,9 @@ export {
   type DeployableTemplate,
 };
 
+/** Milestones surfaced to the deploy progress UI. */
+export type DeployStage = "artifacts" | "providers" | "prove";
+
 export async function deployPlaygroundContract(
   connectedAPI: ConnectedAPI,
   template: string,
@@ -40,12 +43,31 @@ export async function deployPlaygroundContract(
     projectId?: string | null;
     witnessSpecs?: Array<{ name: string; type: string }>;
     witnessValues?: Record<string, string>;
+    constructorParams?: Array<{
+      name: string;
+      type: string;
+      typeSchema?: import("@/lib/compact-values").CompactTypeSchema;
+    }>;
+    constructorValues?: Record<string, string>;
+    requireWitnessValuesAtDeploy?: boolean;
+    typeEnv?: import("@/lib/compact-values").CompactTypeEnv;
+    feeMode?: "sponsored" | "self";
+    onStage?: (stage: DeployStage) => void;
   },
 ): Promise<DeployResult> {
   const t0 = Date.now();
   const log = (level: LogEntry["level"], message: string) =>
     addLog({ id: generateId(), timestamp: Date.now(), level, message, source: "network" });
+  const stage = (s: DeployStage) => options?.onStage?.(s);
+  stage("artifacts");
 
+  const feeMode = options?.feeMode ?? "self";
+  log(
+    "info",
+    feeMode === "sponsored"
+      ? "Fee mode: Sponsored (CompactLab pays network fees)."
+      : "Fee mode: Self-pay (fees from your tDUST).",
+  );
   if (typeof connectedAPI.getProvingProvider !== "function") {
     const msg =
       "Connected wallet cannot prove ZK transactions. CompactLab v1 requires 1AM (https://1am.xyz/).";
@@ -55,11 +77,58 @@ export async function deployPlaygroundContract(
 
   const witnessSpecs = options?.witnessSpecs ?? [];
   const witnessValues = options?.witnessValues ?? {};
-  if (witnessSpecs.length > 0) {
+  const constructorParams = options?.constructorParams ?? [];
+  const constructorValues = options?.constructorValues ?? {};
+  const requireWitnessValuesAtDeploy = options?.requireWitnessValuesAtDeploy === true;
+  const typeEnv = options?.typeEnv;
+
+  if (constructorParams.length > 0) {
+    const { validateCompactParams } = await import("@/lib/compact-values");
+    const ctorErr = validateCompactParams(
+      constructorParams,
+      constructorValues,
+      "Constructor parameter",
+      typeEnv,
+    );
+    if (ctorErr) {
+      log("error", ctorErr);
+      log("warn", "Fill Constructor parameters in Contract UI before Deploy.");
+      return { success: false, duration: Date.now() - t0, error: ctorErr };
+    }
     log(
       "info",
-      `Contract declares ${witnessSpecs.length} witness(es): ${witnessSpecs.map((s) => s.name).join(", ")}. Values are needed at Call, not Deploy.`,
+      `Constructor requires ${constructorParams.length} argument(s): ${constructorParams
+        .map((p) => `${p.name}: ${p.type}`)
+        .join(", ")}.`,
     );
+  }
+
+  if (witnessSpecs.length > 0) {
+    if (requireWitnessValuesAtDeploy) {
+      const { validateWitnessValues } = await import("@/lib/playground-witnesses");
+      const witnessErr = validateWitnessValues(witnessSpecs, witnessValues);
+      if (witnessErr) {
+        log("error", witnessErr.replace("before Call", "before Deploy"));
+        log(
+          "warn",
+          "This constructor calls witness(es). Set Private witnesses in Contract UI before Deploy.",
+        );
+        return {
+          success: false,
+          duration: Date.now() - t0,
+          error: witnessErr.replace("before Call", "before Deploy"),
+        };
+      }
+      log(
+        "info",
+        `Constructor uses witness(es): ${witnessSpecs.map((s) => s.name).join(", ")}. Using your Contract UI values.`,
+      );
+    } else {
+      log(
+        "info",
+        `Contract declares ${witnessSpecs.length} witness(es): ${witnessSpecs.map((s) => s.name).join(", ")}. Values are needed at Call (placeholders used at Deploy).`,
+      );
+    }
   }
 
   let slug: string;
@@ -84,6 +153,7 @@ export async function deployPlaygroundContract(
     log("warn", "IDE --skip-zk compile does not change these assets. Use Compile (ZK) to deploy your edits.");
   }
 
+  stage("providers");
   log("info", "Connecting to Midnight Preprod…");
   log("info", `Indexer: ${PREPROD_CONFIG.indexerUri}`);
   log("info", "ZK proving will run in the 1AM wallet (no local Docker proof server).");
@@ -98,7 +168,7 @@ export async function deployPlaygroundContract(
       connectedAPI as Parameters<typeof createContractProviders>[0],
       PREPROD_CONFIG,
       assetBase,
-      `compactlab:${slug}`,
+      { storeName: `compactlab:${slug}`, feeMode },
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -109,12 +179,24 @@ export async function deployPlaygroundContract(
     return { success: false, duration: Date.now() - t0, error: `Provider setup failed: ${msg}` };
   }
 
+  stage("prove");
   log("info", "Providers ready. Submitting deploy transaction…");
-  log("info", "ZK proof generation may take 1–2 minutes inside 1AM. Approve when prompted.");
+  if (feeMode === "self") {
+    log("info", "ZK proof generation may take 1–2 minutes inside 1AM. Approve fee payment when prompted.");
+  } else {
+    log(
+      "info",
+      "ZK proof generation may take 1–2 minutes inside 1AM. Approve proving when prompted; CompactLab sponsors network fees.",
+    );
+  }
 
   const api = new PlaygroundContractAPI(providers, slug, assetBase, {
     witnessSpecs,
     witnessValues,
+    constructorParams,
+    constructorValues,
+    requireWitnessValuesAtDeploy,
+    typeEnv,
   });
 
   let contractAddress: string;

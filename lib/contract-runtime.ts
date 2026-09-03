@@ -49,7 +49,15 @@ import {
   type PlaygroundPrivateState,
   type WitnessSpec,
 } from "@/lib/playground-witnesses";
+import {
+  encodeCompactParams,
+  parseInitialStateParamsFromDts,
+  validateCompactParams,
+} from "@/lib/compact-values";
 import { toAbsoluteAssetUrl } from "@/lib/playground-assets";
+import { formatCompactRuntimeValue, formatLedgerSnapshot } from "@/lib/compact-runtime-format";
+import { apiFetch } from "@/lib/api";
+import type { FeeMode } from "@/lib/fee-mode";
 export {
   BUNDLED_DEPLOYABLE,
   bundledAssetBase,
@@ -63,6 +71,12 @@ export type ContractSlug = "hello-world" | "counter" | string;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type AnyProviders = MidnightProviders<any, any, any>;
 
+export type CreateContractProvidersOptions = {
+  storeName?: string;
+  /** v1 default is self-pay. Sponsored uses CompactLab Dust when enabled. */
+  feeMode?: FeeMode;
+};
+
 /**
  * Build Midnight providers pointed at a ZK asset base URL
  * (e.g. /contracts/hello-world or /contracts/managed/<id>).
@@ -74,8 +88,15 @@ export async function createContractProviders(
   wallet: WalletConnectedAPI,
   config: NetworkConfig,
   zkConfigBasePath: string,
-  storeName = "compactlabPrivateState",
+  storeNameOrOptions: string | CreateContractProvidersOptions = "compactlabPrivateState",
 ): Promise<AnyProviders> {
+  const options: CreateContractProvidersOptions =
+    typeof storeNameOrOptions === "string"
+      ? { storeName: storeNameOrOptions }
+      : storeNameOrOptions;
+  const storeName = options.storeName ?? "compactlabPrivateState";
+  const feeMode: FeeMode = options.feeMode ?? "self";
+
   setNetworkId(config.networkId);
 
   if (typeof wallet.getProvingProvider !== "function") {
@@ -110,13 +131,18 @@ export async function createContractProviders(
     accountId: `${storeName}:${coinPublicKey}`,
   });
 
+  const payFees = feeMode === "self";
+
   const walletProvider: WalletProvider = {
     getCoinPublicKey: () => coinPublicKey,
     getEncryptionPublicKey: () => addresses.shieldedEncryptionPublicKey,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     balanceTx: async (tx: UnboundTransaction, _ttl?: Date): Promise<any> => {
       const hexUnbound = toHex(tx.serialize());
-      const { tx: hexBalanced } = await wallet.balanceUnsealedTransaction(hexUnbound);
+      const { tx: hexBalanced } = await wallet.balanceUnsealedTransaction(
+        hexUnbound,
+        { payFees },
+      );
       return Transaction.deserialize(
         "signature" as SignatureEnabled["instance"],
         "proof" as Proof["instance"],
@@ -130,6 +156,28 @@ export async function createContractProviders(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     submitTx: async (tx: any): Promise<TransactionId> => {
       const hexFinalized = toHex(tx.serialize());
+      if (feeMode === "sponsored") {
+        const res = await apiFetch("/v1/sponsor", {
+          method: "POST",
+          json: { tx: hexFinalized },
+        });
+        const text = await res.text();
+        let body: { txId?: string; error?: string; success?: boolean } = {};
+        try {
+          body = text ? (JSON.parse(text) as typeof body) : {};
+        } catch {
+          throw new Error(
+            `Sponsor returned non-JSON (${res.status}): ${text.trim().slice(0, 160) || res.statusText}`,
+          );
+        }
+        if (!res.ok) {
+          throw new Error(
+            body.error || `Sponsorship failed (${res.status}). Switch to Self-pay or retry later.`,
+          );
+        }
+        return (body.txId || hexFinalized.slice(0, 64)) as TransactionId;
+      }
+
       await wallet.submitTransaction(hexFinalized);
       const ids = tx.identifiers();
       return ids[0] ?? hexFinalized.slice(0, 64);
@@ -182,6 +230,17 @@ export type PlaygroundWitnessOptions = {
   witnessSpecs?: WitnessSpec[];
   /** User string values from Contract UI (name → input). */
   witnessValues?: Record<string, string>;
+  /** Compact constructor parameter specs (declaration order). */
+  constructorParams?: Array<{ name: string; type: string }>;
+  /** User string values for constructor args. */
+  constructorValues?: Record<string, string>;
+  /**
+   * When true, deploy requires real witness values (constructor calls witnesses).
+   * When false/undefined, placeholders are allowed at deploy.
+   */
+  requireWitnessValuesAtDeploy?: boolean;
+  /** Enum/struct decls from Compact source for JSON composite encoding. */
+  typeEnv?: import("@/lib/compact-values").CompactTypeEnv;
 };
 
 async function getCompiledContract(
@@ -241,6 +300,32 @@ function requireUserPrivateState(
   }
 }
 
+async function fetchGeneratedDts(assetBase: string): Promise<string | null> {
+  try {
+    const url = `${toAbsoluteAssetUrl(assetBase)}/contract/index.d.ts`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    return await res.text();
+  } catch {
+    return null;
+  }
+}
+
+async function resolveDeployConstructorParams(
+  assetBase: string,
+  fromOpts: Array<{ name: string; type: string }> | undefined,
+): Promise<Array<{ name: string; type: string }>> {
+  const dts = await fetchGeneratedDts(assetBase);
+  const fromDts = dts ? parseInitialStateParamsFromDts(dts) : [];
+  // Prefer source/UI specs when arity matches (better Compact type strings).
+  if (fromOpts && fromOpts.length > 0) {
+    if (fromDts.length === 0 || fromDts.length === fromOpts.length) return fromOpts;
+    // Arity mismatch: trust generated artifacts (what deploy will invoke).
+    return fromDts;
+  }
+  return fromDts;
+}
+
 export class PlaygroundContractAPI {
   private providers: AnyProviders;
   private slug: string;
@@ -273,19 +358,48 @@ export class PlaygroundContractAPI {
       this.witnessOpts,
     );
 
+    const constructorParams = await resolveDeployConstructorParams(
+      this.assetBase,
+      this.witnessOpts.constructorParams,
+    );
+    const constructorValues = this.witnessOpts.constructorValues ?? {};
+
+    if (constructorParams.length > 0) {
+      const ctorErr = validateCompactParams(
+        constructorParams,
+        constructorValues,
+        "Constructor parameter",
+        this.witnessOpts.typeEnv,
+      );
+      if (ctorErr) throw new Error(ctorErr);
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const options: Record<string, unknown> = { compiledContract };
     let initialPrivateState: PlaygroundPrivateState | undefined;
 
     if (privateStateId && witnessSpecs.length > 0) {
-      // Deploy runs the constructor. Witness *functions* must be wired, but values
-      // are only needed if the constructor calls them (bboard does not). Official
-      // example seeds random private state without prompting the user.
-      initialPrivateState =
-        tryBuildPrivateStateFromValues(witnessSpecs, this.witnessOpts.witnessValues) ??
-        createPlaceholderPrivateState(witnessSpecs);
+      if (this.witnessOpts.requireWitnessValuesAtDeploy) {
+        initialPrivateState = requireUserPrivateState(
+          witnessSpecs,
+          this.witnessOpts.witnessValues,
+          "Deploy (constructor uses witnesses)",
+        );
+      } else {
+        initialPrivateState =
+          tryBuildPrivateStateFromValues(witnessSpecs, this.witnessOpts.witnessValues) ??
+          createPlaceholderPrivateState(witnessSpecs);
+      }
       options.privateStateId = privateStateId;
       options.initialPrivateState = initialPrivateState;
+    }
+
+    if (constructorParams.length > 0) {
+      options.args = encodeCompactParams(
+        constructorParams,
+        constructorValues,
+        this.witnessOpts.typeEnv,
+      );
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -298,9 +412,12 @@ export class PlaygroundContractAPI {
     }
     if (witnessSpecs.length > 0) {
       console.info(
-        `[compactlab] Deployed (witness fns wired; private values used at Call): ${witnessSpecs
-          .map((s) => s.name)
-          .join(", ")}`,
+        `[compactlab] Deployed (witness fns wired): ${witnessSpecs.map((s) => s.name).join(", ")}`,
+      );
+    }
+    if (constructorParams.length > 0) {
+      console.info(
+        `[compactlab] Constructor args: ${constructorParams.map((p) => p.name).join(", ")}`,
       );
     }
 
@@ -333,7 +450,6 @@ export class PlaygroundContractAPI {
     const options: Record<string, unknown> = { compiledContract, contractAddress };
 
     if (privateStateId && witnessSpecs.length > 0) {
-      // Call-time: user must supply the private values circuits will read.
       const fromUser = requireUserPrivateState(
         witnessSpecs,
         this.witnessOpts.witnessValues,
@@ -350,11 +466,15 @@ export class PlaygroundContractAPI {
     this.foundContract = found;
   }
 
-  /** Call an exported circuit by name with positional args derived from the args map. */
+  /**
+   * Call an exported circuit by name.
+   * `paramSpecs` should match Compact declaration order; values are typed-encoded.
+   */
   async callCircuit(
     circuitName: string,
     args: Record<string, string>,
-  ): Promise<{ txId: string }> {
+    paramSpecs: Array<{ name: string; type: string }> = [],
+  ): Promise<PlaygroundCallResult> {
     if (!this.foundContract) {
       throw new Error("Not connected to a contract. Call deploy() or join() first.");
     }
@@ -363,23 +483,26 @@ export class PlaygroundContractAPI {
       throw new Error(`Circuit "${circuitName}" is not available on this contract.`);
     }
 
-    const values = Object.values(args);
-    let result;
-    if (circuitName === "storeMessage" || circuitName === "post") {
-      const msg = args["newMessage"] ?? values[0] ?? "";
-      result = await callTx[circuitName](msg);
-    } else if (circuitName === "increment") {
-      result = await callTx.increment();
-    } else if (circuitName === "incrementBy") {
-      const amount = BigInt(args["amount"] ?? values[0] ?? "1");
-      result = await callTx.incrementBy(amount);
-    } else if (circuitName === "takeDown" || values.length === 0) {
-      result = await callTx[circuitName]();
-    } else {
-      result = await callTx[circuitName](...values);
-    }
+    const encoded =
+      paramSpecs.length === 0
+        ? []
+        : encodeCompactParams(paramSpecs, args, this.witnessOpts.typeEnv);
 
-    return { txId: result.public.txId as string };
+    const result = await callTx[circuitName](...encoded);
+    const pub = result.public as {
+      txId?: string;
+      txHash?: string;
+      status?: string;
+      blockHeight?: number;
+    };
+    const rawReturn = result.private?.result;
+    return {
+      txId: String(pub.txId ?? ""),
+      txHash: pub.txHash ? String(pub.txHash) : undefined,
+      status: pub.status != null ? String(pub.status) : undefined,
+      blockHeight: typeof pub.blockHeight === "number" ? pub.blockHeight : undefined,
+      returnValue: formatCompactRuntimeValue(rawReturn),
+    };
   }
 
   async readLedger(): Promise<Record<string, string>> {
@@ -392,25 +515,16 @@ export class PlaygroundContractAPI {
     );
     const mod = await loadContractModule(this.assetBase);
     const ledger = mod.ledger(states.contractState.data) as Record<string, unknown>;
-    const out: Record<string, string> = {};
-    for (const [k, v] of Object.entries(ledger)) {
-      if (v === null || v === undefined) continue;
-      if (typeof v === "object" && v !== null) {
-        // Maybe<T>
-        if ("is_some" in v) {
-          const maybe = v as { is_some: boolean; value: unknown };
-          out[k] = maybe.is_some ? String(maybe.value) : "(none)";
-          continue;
-        }
-        if ("toString" in v) {
-          out[k] = String((v as { toString: () => string }).toString());
-          continue;
-        }
-      }
-      out[k] = String(v);
-    }
-    return out;
+    return formatLedgerSnapshot(ledger);
   }
 }
+
+export type PlaygroundCallResult = {
+  txId: string;
+  txHash?: string;
+  status?: string;
+  blockHeight?: number;
+  returnValue: string;
+};
 
 export { PREPROD_CONFIG };

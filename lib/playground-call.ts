@@ -30,8 +30,21 @@ export async function callPlaygroundCircuit(
     projectId?: string | null;
     witnessSpecs?: Array<{ name: string; type: string }>;
     witnessValues?: Record<string, string>;
+    circuitParams?: Array<{
+      name: string;
+      type: string;
+      typeSchema?: import("@/lib/compact-values").CompactTypeSchema;
+    }>;
+    typeEnv?: import("@/lib/compact-values").CompactTypeEnv;
+    feeMode?: "sponsored" | "self";
   },
-): Promise<{ txId: string }> {
+): Promise<{
+  txId: string;
+  txHash?: string;
+  status?: string;
+  blockHeight?: number;
+  returnValue: string;
+}> {
   const t0 = Date.now();
 
   if (typeof connectedAPI.getProvingProvider !== "function") {
@@ -40,8 +53,29 @@ export async function callPlaygroundCircuit(
     );
   }
 
+  const feeMode = options?.feeMode ?? "self";
+  log(
+    addLog,
+    "info",
+    feeMode === "sponsored"
+      ? "Fee mode: Sponsored (CompactLab pays network fees)."
+      : "Fee mode: Self-pay (fees from your tDUST).",
+  );
+
   const witnessSpecs = options?.witnessSpecs ?? [];
   const witnessValues = options?.witnessValues ?? {};
+  const circuitParams = options?.circuitParams ?? [];
+  const typeEnv = options?.typeEnv;
+
+  if (circuitParams.length > 0) {
+    const { validateCompactParams } = await import("@/lib/compact-values");
+    const argErr = validateCompactParams(circuitParams, args, "Circuit argument", typeEnv);
+    if (argErr) {
+      log(addLog, "error", argErr);
+      throw new Error(argErr);
+    }
+  }
+
   if (witnessSpecs.length > 0) {
     const { validateWitnessValues } = await import("@/lib/playground-witnesses");
     const witnessErr = validateWitnessValues(witnessSpecs, witnessValues);
@@ -68,24 +102,33 @@ export async function callPlaygroundCircuit(
     connectedAPI as Parameters<typeof createContractProviders>[0],
     PREPROD_CONFIG,
     assetBase,
-    `compactlab:${slug}`,
+    { storeName: `compactlab:${slug}`, feeMode },
   );
 
   const api = new PlaygroundContractAPI(providers, slug, assetBase, {
     witnessSpecs,
     witnessValues,
+    typeEnv,
   });
   await api.join(contractAddress as ContractAddress);
 
   log(addLog, "info", `Calling ${circuitName}(…)…`);
   log(addLog, "info", "ZK proof generation may take 1–2 minutes inside 1AM.");
-  log(addLog, "warn", "Approve the transaction fee in 1AM when prompted.");
+  if (feeMode === "self") {
+    log(addLog, "warn", "Approve the transaction fee in 1AM when prompted.");
+  } else {
+    log(addLog, "info", "Approve proving in 1AM when prompted. Network fees are sponsored by CompactLab.");
+  }
 
   try {
-    const txResult = await api.callCircuit(circuitName, args);
+    const txResult = await api.callCircuit(circuitName, args, circuitParams);
     const duration = Date.now() - t0;
-    log(addLog, "success", `Transaction submitted in ${(duration / 1000).toFixed(1)}s`);
+    log(addLog, "success", `${circuitName} confirmed in ${(duration / 1000).toFixed(1)}s`);
+    if (txResult.status) log(addLog, "info", `Tx status: ${txResult.status}`);
     log(addLog, "success", `Tx ID: ${txResult.txId}`);
+    if (txResult.returnValue && txResult.returnValue !== "[]") {
+      log(addLog, "info", `Circuit return: ${txResult.returnValue}`);
+    }
     return txResult;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -137,19 +180,11 @@ export async function readPlaygroundState(
   );
 
   const { loadBrowserContractModule } = await import("@/lib/browser-contract-module");
+  const { formatLedgerSnapshot } = await import("@/lib/compact-runtime-format");
   const mod = await loadBrowserContractModule(assetBase);
   const ledger = mod.ledger(states.contractState.data) as Record<string, unknown>;
 
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(ledger)) {
-    if (v === null || v === undefined) continue;
-    out[k] =
-      typeof v === "object" && v !== null && "toString" in v
-        ? String((v as { toString: () => string }).toString())
-        : String(v);
-  }
-
   void slug;
   void bundledAssetBase;
-  return out;
+  return formatLedgerSnapshot(ledger);
 }

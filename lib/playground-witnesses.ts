@@ -2,83 +2,39 @@
  * Playground witness helpers — parse user-supplied private inputs and
  * build Compact witness functions from declared `witness` specs.
  *
- * Hex helpers are local so this module stays browser-safe (midnight-js-utils
- * pulls Node APIs that break Client Component SSR).
+ * Encoding is shared with constructor/circuit args via compact-values.
  */
 
-function toHex(bytes: Uint8Array): string {
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-}
+import {
+  bytesLengthFromType,
+  compactValueKind,
+  generateBytesHex,
+  parseCompactValue,
+  validateCompactParams,
+  type CompactParamSpec,
+  type CompactValueKind,
+} from "@/lib/compact-values";
 
-function fromHex(hex: string): Uint8Array {
-  const clean = hex.startsWith("0x") || hex.startsWith("0X") ? hex.slice(2) : hex;
-  if (clean.length % 2 !== 0) {
-    throw new Error("Hex string must have even length");
-  }
-  const out = new Uint8Array(clean.length / 2);
-  for (let i = 0; i < out.length; i++) {
-    out[i] = Number.parseInt(clean.slice(i * 2, i * 2 + 2), 16);
-  }
-  return out;
-}
+export type WitnessSpec = CompactParamSpec;
 
-export type WitnessSpec = { name: string; type: string };
-
+/** @deprecated Use CompactValueKind — kept for WitnessInputRow compat. */
 export type WitnessFieldKind = "bytes" | "boolean" | "integer" | "string" | "unknown";
 
 export type PlaygroundPrivateState = Record<string, unknown>;
 
 export function witnessFieldKind(type: string): WitnessFieldKind {
-  const t = type.trim();
-  if (/^Boolean$/i.test(t) || /^Bool$/i.test(t)) return "boolean";
-  if (/^Bytes<\s*\d+\s*>$/i.test(t)) return "bytes";
-  if (/^(Uint|Field|Counter|Unsigned|Nat)(<|$)/i.test(t)) return "integer";
-  if (/Opaque\s*<\s*["']string["']\s*>/i.test(t)) return "string";
+  const kind = compactValueKind(type);
+  if (kind === "boolean" || kind === "bytes" || kind === "integer" || kind === "string") {
+    return kind;
+  }
+  if (kind === "coinPublicKey" || kind === "contractAddress") return "bytes";
   return "unknown";
 }
 
-export function bytesLengthFromType(type: string): number | null {
-  const m = type.trim().match(/^Bytes<\s*(\d+)\s*>$/i);
-  return m ? Number(m[1]) : null;
-}
-
-/** Random hex for Bytes<N> (no 0x prefix). */
-export function generateBytesHex(byteLength = 32): string {
-  return toHex(crypto.getRandomValues(new Uint8Array(byteLength)));
-}
+export { bytesLengthFromType, generateBytesHex };
 
 export function parseWitnessValue(type: string, raw: string): unknown {
-  const kind = witnessFieldKind(type);
-  const value = raw.trim();
-
-  if (kind === "boolean") {
-    const lower = value.toLowerCase();
-    if (lower === "true" || lower === "1" || lower === "yes") return true;
-    if (lower === "false" || lower === "0" || lower === "no") return false;
-    throw new Error(`Expected true/false for Boolean, got "${raw}"`);
-  }
-
-  if (kind === "bytes") {
-    const len = bytesLengthFromType(type) ?? 32;
-    const hex = value.startsWith("0x") || value.startsWith("0X") ? value.slice(2) : value;
-    if (!/^[0-9a-fA-F]*$/.test(hex)) {
-      throw new Error(`Expected hex for ${type}`);
-    }
-    if (hex.length !== len * 2) {
-      throw new Error(`${type} needs ${len * 2} hex chars (got ${hex.length})`);
-    }
-    return fromHex(hex);
-  }
-
-  if (kind === "integer") {
-    if (!/^-?\d+$/.test(value)) {
-      throw new Error(`Expected integer for ${type}, got "${raw}"`);
-    }
-    return BigInt(value);
-  }
-
-  // string / unknown — pass through as Opaque string / raw
-  return value;
+  return parseCompactValue(type, raw);
 }
 
 /** Returns an error message if any declared witness is missing or invalid. */
@@ -87,29 +43,25 @@ export function validateWitnessValues(
   values: Record<string, string>,
 ): string | null {
   if (specs.length === 0) return null;
-  const missing = specs.filter((s) => !(values[s.name] ?? "").trim());
-  if (missing.length > 0) {
-    return `Set private witness value(s) in Contract UI before Call: ${missing.map((m) => m.name).join(", ")}`;
+  const err = validateCompactParams(specs, values, "Witness");
+  if (!err) return null;
+  if (err.startsWith("Set witness value")) {
+    return err.replace(
+      "Set witness value(s):",
+      "Set private witness value(s) in Contract UI:",
+    );
   }
-  for (const spec of specs) {
-    try {
-      parseWitnessValue(spec.type, values[spec.name] ?? "");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return `Witness "${spec.name}": ${msg}`;
-    }
-  }
-  return null;
+  return err;
 }
 
 /**
- * SDK placeholder private state for deploy (constructor rarely reads witnesses).
+ * SDK placeholder private state for deploy when constructor does not read witnesses.
  * Matches official bboard: randomBytes(32) seeded without prompting the user.
  */
 export function createPlaceholderPrivateState(specs: WitnessSpec[]): PlaygroundPrivateState {
   const state: PlaygroundPrivateState = {};
   for (const spec of specs) {
-    const kind = witnessFieldKind(spec.type);
+    const kind = compactValueKind(spec.type);
     if (kind === "bytes") {
       const len = bytesLengthFromType(spec.type) ?? 32;
       state[spec.name] = crypto.getRandomValues(new Uint8Array(len));
@@ -117,6 +69,8 @@ export function createPlaceholderPrivateState(specs: WitnessSpec[]): PlaygroundP
       state[spec.name] = false;
     } else if (kind === "integer") {
       state[spec.name] = BigInt(0);
+    } else if (kind === "coinPublicKey" || kind === "contractAddress") {
+      state[spec.name] = { bytes: crypto.getRandomValues(new Uint8Array(32)) };
     } else {
       state[spec.name] = "";
     }
@@ -165,10 +119,16 @@ export function buildWitnessFunctions(specs: WitnessSpec[]) {
 export function serializePrivateState(state: PlaygroundPrivateState): string {
   const out: Record<string, { t: string; v: string }> = {};
   for (const [k, v] of Object.entries(state)) {
-    if (v instanceof Uint8Array) out[k] = { t: "bytes", v: toHex(v) };
+    if (v instanceof Uint8Array) out[k] = { t: "bytes", v: Array.from(v, (b) => b.toString(16).padStart(2, "0")).join("") };
     else if (typeof v === "boolean") out[k] = { t: "bool", v: v ? "true" : "false" };
     else if (typeof v === "bigint") out[k] = { t: "bigint", v: v.toString() };
-    else out[k] = { t: "string", v: String(v) };
+    else if (v && typeof v === "object" && "bytes" in (v as object) && (v as { bytes: unknown }).bytes instanceof Uint8Array) {
+      const bytes = (v as { bytes: Uint8Array }).bytes;
+      out[k] = {
+        t: "coin",
+        v: Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(""),
+      };
+    } else out[k] = { t: "string", v: String(v) };
   }
   return JSON.stringify(out);
 }
@@ -179,8 +139,21 @@ export function deserializePrivateState(raw: string): PlaygroundPrivateState | n
     const state: PlaygroundPrivateState = {};
     for (const [k, entry] of Object.entries(parsed)) {
       if (!entry || typeof entry.t !== "string") return null;
-      if (entry.t === "bytes") state[k] = fromHex(entry.v);
-      else if (entry.t === "bool") state[k] = entry.v === "true";
+      if (entry.t === "bytes") {
+        const hex = entry.v;
+        const out = new Uint8Array(hex.length / 2);
+        for (let i = 0; i < out.length; i++) {
+          out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+        }
+        state[k] = out;
+      } else if (entry.t === "coin") {
+        const hex = entry.v;
+        const out = new Uint8Array(hex.length / 2);
+        for (let i = 0; i < out.length; i++) {
+          out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+        }
+        state[k] = { bytes: out };
+      } else if (entry.t === "bool") state[k] = entry.v === "true";
       else if (entry.t === "bigint") state[k] = BigInt(entry.v);
       else state[k] = entry.v;
     }
@@ -204,7 +177,6 @@ export function mergeWitnessSpecs(
       byName.set(name, { name, type: "Bytes<32>" });
     }
   }
-  // Preserve source order, then any extras
   const ordered: WitnessSpec[] = [];
   for (const s of fromSource) ordered.push(byName.get(s.name)!);
   for (const name of detectedNames) {
@@ -212,3 +184,6 @@ export function mergeWitnessSpecs(
   }
   return ordered.length > 0 ? ordered : detectedNames.map((name) => ({ name, type: "Bytes<32>" }));
 }
+
+// silence unused type import warning in some TS configs
+export type { CompactValueKind };
