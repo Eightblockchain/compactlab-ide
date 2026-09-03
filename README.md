@@ -23,8 +23,10 @@ pnpm install
 pnpm dev
 ```
 
-Open http://localhost:3001 — signup required (Free plan).
+Open http://localhost:3001 — signup required (free for the community).
 
-Auth, Compile, indexer, and billing all go to `NEXT_PUBLIC_API_URL` (default `http://localhost:4000`).
+Auth, Compile, and indexer go to `NEXT_PUBLIC_API_URL` (default `http://localhost:4000`).
+
+Deploy/Call uses **Self-pay**: network fees come from your 1AM tDUST on Preprod. Sponsored Dust is implemented but off until a funded sponsor wallet is verified — see [docs/SPONSORSHIP.md](docs/SPONSORSHIP.md). Paid plans are also off (`NEXT_PUBLIC_ENABLE_BILLING`).
 
 See [docs/HOSTING.md](docs/HOSTING.md) and [docs/V1_TEST_SCRIPT.md](docs/V1_TEST_SCRIPT.md).

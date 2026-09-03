@@ -27,6 +27,8 @@ import type {
 } from "@midnight-ntwrk/midnight-js-types";
 import type { TransactionId } from "@midnight-ntwrk/ledger-v8";
 import type { NetworkConfig } from "./types";
+import type { FeeMode } from "@/lib/fee-mode";
+import { apiFetch } from "@/lib/api";
 
 export type HelloWorldCircuitId = "storeMessage";
 export const HELLO_WORLD_PSI = "helloWorldPrivateState" as const;
@@ -44,10 +46,12 @@ export type HelloWorldProviders = MidnightProviders<
  *
  * @param wallet - Connected 1AM DApp Connector wallet API
  * @param config - Network configuration (indexer / node URIs)
+ * @param feeMode - self-pay (v1 default) or sponsored when NEXT_PUBLIC_ENABLE_SPONSORED=1
  */
 export async function createHelloWorldProviders(
   wallet: WalletConnectedAPI,
   config: NetworkConfig,
+  feeMode: FeeMode = "self",
 ): Promise<HelloWorldProviders> {
   setNetworkId(config.networkId);
 
@@ -86,13 +90,18 @@ export async function createHelloWorldProviders(
     accountId: `hello-world:${coinPublicKey}`,
   });
 
+  const payFees = feeMode === "self";
+
   const walletProvider: WalletProvider = {
     getCoinPublicKey: () => coinPublicKey,
     getEncryptionPublicKey: () => addresses.shieldedEncryptionPublicKey,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     balanceTx: async (tx: UnboundTransaction, _ttl?: Date): Promise<any> => {
       const hexUnbound = toHex(tx.serialize());
-      const { tx: hexBalanced } = await wallet.balanceUnsealedTransaction(hexUnbound);
+      const { tx: hexBalanced } = await wallet.balanceUnsealedTransaction(
+        hexUnbound,
+        { payFees },
+      );
       return Transaction.deserialize(
         "signature" as SignatureEnabled["instance"],
         "proof" as Proof["instance"],
@@ -106,6 +115,27 @@ export async function createHelloWorldProviders(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     submitTx: async (tx: any): Promise<TransactionId> => {
       const hexFinalized = toHex(tx.serialize());
+      if (feeMode === "sponsored") {
+        const res = await apiFetch("/v1/sponsor", {
+          method: "POST",
+          json: { tx: hexFinalized },
+        });
+        const text = await res.text();
+        let body: { txId?: string; error?: string } = {};
+        try {
+          body = text ? (JSON.parse(text) as typeof body) : {};
+        } catch {
+          throw new Error(
+            `Sponsor returned non-JSON (${res.status}): ${text.trim().slice(0, 160) || res.statusText}`,
+          );
+        }
+        if (!res.ok) {
+          throw new Error(
+            body.error || `Sponsorship failed (${res.status}). Switch to Self-pay or retry later.`,
+          );
+        }
+        return (body.txId || hexFinalized.slice(0, 64)) as TransactionId;
+      }
       await wallet.submitTransaction(hexFinalized);
       const ids = tx.identifiers();
       return ids[0] ?? hexFinalized.slice(0, 64);

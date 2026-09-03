@@ -37,9 +37,10 @@ export default function SignupPage() {
     <main className="min-h-screen flex items-center justify-center bg-surface px-4">
       <div className="w-full max-w-md border border-border rounded-xl p-6 bg-surface-elevated space-y-5">
         <div>
-          <h1 className="text-xl font-semibold text-text-primary">Start free</h1>
+          <h1 className="text-xl font-semibold text-text-primary">Join CompactLab</h1>
           <p className="text-sm text-text-muted mt-1">
-            Free plan: Compile then Deploy with 1AM. Hello/Counter also ship bundled keys. Already have an account?{" "}
+            Free for the Midnight community. Compile, then Deploy with 1AM on Preprod.
+            Hello/Counter also ship bundled keys. Already have an account?{" "}
             <Link href="/login" className="text-accent">
               Log in
             </Link>
@@ -84,7 +85,7 @@ export default function SignupPage() {
             disabled={busy}
             className="w-full rounded-md bg-accent text-black font-medium py-2 text-sm disabled:opacity-60"
           >
-            {busy ? "Creating…" : "Create free account"}
+            {busy ? "Creating…" : "Create account"}
           </button>
         </form>
       </div>
