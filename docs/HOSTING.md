@@ -11,7 +11,7 @@ Four independent apps / repos:
 
 ## Env
 
-**API:** `DATABASE_URL`, `COMPACTLAB_JWT_SECRET`, `CORS_ORIGINS`, `API_PUBLIC_URL`, optional `REDIS_URL`, `S3_*`, `STRIPE_*`, `ADMIN_EMAIL` / `ADMIN_PASSWORD`.
+**API:** Postgres `DATABASE_URL` (`postgresql://…`), `COMPACTLAB_JWT_SECRET`, `CORS_ORIGINS`, `API_PUBLIC_URL`, `REDIS_URL` (required for fair rate limits), optional `S3_*`, `STRIPE_*`, `ADMIN_EMAIL` / `ADMIN_PASSWORD`. Apply schema with `pnpm db:migrate:deploy`. To copy a legacy SQLite file: `SQLITE_PATH=./prisma/data/compactlab.db pnpm db:migrate:from-sqlite`.
 
 **Fee sponsorship (off for v1):** protocol matches [example-private-party SPONSORSHIP.md](https://github.com/midnightntwrk/example-private-party/blob/main/docs/SPONSORSHIP.md). To enable later: `COMPACTLAB_ENABLE_SPONSOR=true` plus `COMPACTLAB_SPONSOR_SEED` or `COMPACTLAB_SPONSOR_MNEMONIC`, playground `NEXT_PUBLIC_ENABLE_SPONSORED=1`, and a local proof server on `:6300`. Status must show spendable Dust (`availableCoins >= 1`). See [SPONSORSHIP.md](./SPONSORSHIP.md).
 
@@ -27,4 +27,4 @@ Four independent apps / repos:
 
 ## Storage
 
-SQLite file by default in `api`. Redis/S3 optional with local fallbacks.
+Postgres is required (`DATABASE_URL`). Redis is required for multi-instance rate limits. S3 is optional (local disk fallback for ZK artifacts).

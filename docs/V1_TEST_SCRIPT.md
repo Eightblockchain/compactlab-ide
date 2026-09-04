@@ -5,6 +5,8 @@
 3. Unauthenticated `/playground` redirects to `/login`.
 4. Signup → Community chip (not Free/Pro). Hello/Counter Instant Deploy with 1AM.
 5. Connect 1AM on Preprod. Fund tNIGHT at the faucet if tDUST is 0. Deploy opens a progress modal (connect → fees → artifacts → providers → prove). Empty tDUST should fail in the modal, not silently continue.
-6. After success: copy address, open 1AM explorer, Open Contract UI, Call a circuit.
-7. Sponsored / Upgrade-to-Pro are hidden. Do not test Stripe unless `COMPACTLAB_ENABLE_BILLING=true` and `NEXT_PUBLIC_ENABLE_BILLING=1`.
-8. Admin login toggles compile / maintenance / announcement.
+6. After success: copy address, open 1AM explorer, Open Contract, Call a circuit. Ledger values appear in the Contract panel (not a Simulate tab).
+7. Landing copy says signup + Preprod + 1AM — not Simulate / no-signup / Testnet.
+8. Sponsored / Upgrade-to-Pro are hidden. Do not test Stripe unless `COMPACTLAB_ENABLE_BILLING=true` and `NEXT_PUBLIC_ENABLE_BILLING=1`.
+9. Admin login toggles compile / maintenance / announcement; playground shows the announcement banner.
+10. Restart the API after changing `DATABASE_URL`. `GET /v1/health` returns 200 with `"db":"ok"` (503 if Postgres is down).
