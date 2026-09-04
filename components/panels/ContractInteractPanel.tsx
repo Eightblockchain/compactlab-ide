@@ -60,6 +60,7 @@ export function ContractInteractPanel() {
     setBottomPanelOpen,
     witnessValues,
     setWitnessValue,
+    saveContractAddress,
   } = useIDEStore();
   const lace = useLaceWallet();
 
@@ -186,11 +187,13 @@ export function ContractInteractPanel() {
 
   const selected = circuits.find((c) => c.name === selectedCircuit) ?? circuits[0];
 
-  const handleLoadAddress = () => {
-    const addr = addressInput.trim();
+  const handleLoadAddress = (addrOverride?: string) => {
+    const addr = (addrOverride ?? addressInput).trim();
     if (!addr) return;
+    setAddressInput(addr);
     setActiveAddress(addr);
     setLastResult(null);
+    saveContractAddress(addr);
   };
 
   const refreshUntilSettled = useCallback(
@@ -350,6 +353,7 @@ export function ContractInteractPanel() {
           addressInput={addressInput}
           setAddressInput={setAddressInput}
           onLoad={handleLoadAddress}
+          savedAddress={deployResult?.contractAddress}
         />
       </div>
     );
@@ -661,7 +665,7 @@ function JoinAnother({
   onToggle: () => void;
   addressInput: string;
   setAddressInput: (v: string) => void;
-  onLoad: () => void;
+  onLoad: (addr?: string) => void;
   savedAddress?: string;
 }) {
   return (
@@ -699,7 +703,7 @@ function JoinAnother({
               type="button"
               className="text-2xs text-text-secondary hover:underline"
               onClick={() => {
-                setAddressInput(savedAddress);
+                onLoad(savedAddress);
               }}
             >
               Use saved deploy

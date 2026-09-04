@@ -12,6 +12,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Topbar } from "@/components/layout/Topbar";
 import { OnboardingStrip } from "@/components/layout/OnboardingStrip";
 import { PublicModeBanner } from "@/components/layout/PublicModeBanner";
+import { AnnouncementBanner } from "@/components/layout/AnnouncementBanner";
 import { WorkspaceNoticeBanner } from "@/components/layout/WorkspaceNoticeBanner";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { CompactEditor } from "@/components/editor/CompactEditor";
@@ -91,6 +92,7 @@ export default function PlaygroundPage() {
     <div className="flex flex-col h-screen overflow-hidden bg-surface">
       <Topbar />
       <PublicModeBanner />
+      <AnnouncementBanner />
       <WorkspaceNoticeBanner />
       <OnboardingStrip />
 
