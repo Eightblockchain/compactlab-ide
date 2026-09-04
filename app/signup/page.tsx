@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { OAuthButtons } from "@/components/auth/OAuthButtons";
+import { CompactLabLogo } from "@/components/brand/CompactLabLogo";
 
 export default function SignupPage() {
   const { signup, user, loading } = useAuth();
@@ -35,16 +36,19 @@ export default function SignupPage() {
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-surface px-4">
-      <div className="w-full max-w-md border border-border rounded-xl p-6 bg-surface-elevated space-y-5">
-        <div>
-          <h1 className="text-xl font-semibold text-text-primary">Join CompactLab</h1>
-          <p className="text-sm text-text-muted mt-1">
-            Free for the Midnight community. Compile, then Deploy with 1AM on Preprod.
-            Hello/Counter also ship bundled keys. Already have an account?{" "}
-            <Link href="/login" className="text-accent">
-              Log in
-            </Link>
-          </p>
+      <div className="w-full max-w-md border border-border rounded-xl p-6 sm:p-7 bg-surface-elevated space-y-5">
+        <div className="space-y-4">
+          <CompactLabLogo height={32} className="h-8 w-auto" />
+          <div>
+            <h1 className="text-xl font-semibold text-text-primary">Join CompactLab</h1>
+            <p className="text-sm text-text-muted mt-1">
+              Free for the Midnight community. Compile, then Deploy with 1AM on Preprod.
+              Hello/Counter also ship bundled keys. Already have an account?{" "}
+              <Link href="/login" className="text-accent">
+                Log in
+              </Link>
+            </p>
+          </div>
         </div>
 
         <OAuthButtons labelPrefix="Sign up" />

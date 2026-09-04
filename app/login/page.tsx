@@ -4,8 +4,8 @@ import { FormEvent, Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
-import { API_BASE } from "@/lib/api";
 import { OAuthButtons } from "@/components/auth/OAuthButtons";
+import { CompactLabLogo } from "@/components/brand/CompactLabLogo";
 
 function LoginForm() {
   const { login, user, loading } = useAuth();
@@ -41,15 +41,18 @@ function LoginForm() {
 
   return (
     <main className="min-h-screen flex items-center justify-center bg-surface px-4">
-      <div className="w-full max-w-md border border-border rounded-xl p-6 bg-surface-elevated space-y-5">
-        <div>
-          <h1 className="text-xl font-semibold text-text-primary">Log in to CompactLab</h1>
-          <p className="text-sm text-text-muted mt-1">
-            Playground access requires an account.{" "}
-            <Link href="/signup" className="text-accent">
-              Create free account
-            </Link>
-          </p>
+      <div className="w-full max-w-md border border-border rounded-xl p-6 sm:p-7 bg-surface-elevated space-y-5">
+        <div className="space-y-4">
+          <CompactLabLogo height={32} className="h-8 w-auto" />
+          <div>
+            <h1 className="text-xl font-semibold text-text-primary">Log in to CompactLab</h1>
+            <p className="text-sm text-text-muted mt-1">
+              Playground access requires an account.{" "}
+              <Link href="/signup" className="text-accent">
+                Create free account
+              </Link>
+            </p>
+          </div>
         </div>
 
         <OAuthButtons />
@@ -93,11 +96,6 @@ function LoginForm() {
           </a>{" "}
           wallet on Midnight Preprod.
         </p>
-        {process.env.NODE_ENV === "development" && (
-          <p className="text-2xs text-text-dim text-center">
-            API: {API_BASE.replace(/^https?:\/\//, "")}
-          </p>
-        )}
       </div>
     </main>
   );

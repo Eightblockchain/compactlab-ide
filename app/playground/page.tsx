@@ -62,28 +62,40 @@ export default function PlaygroundPage() {
       <div
         style={{
           display: "flex",
+          flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
           height: "100vh",
           background: "#0d0d0d",
-          color: "#636360",
+          color: "#8a8a86",
           fontFamily: "'JetBrains Mono', monospace",
           fontSize: "12px",
-          gap: "10px",
+          gap: "16px",
         }}
       >
-        <span
-          style={{
-            display: "inline-block",
-            width: 14,
-            height: 14,
-            borderRadius: "50%",
-            border: "2px solid #E95144",
-            borderTopColor: "transparent",
-            animation: "spin 0.7s linear infinite",
-          }}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/cl-icon.png"
+          alt=""
+          width={40}
+          height={40}
+          style={{ objectFit: "contain", opacity: 0.95 }}
+          draggable={false}
         />
-        Loading CompactLab…
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span
+            style={{
+              display: "inline-block",
+              width: 14,
+              height: 14,
+              borderRadius: "50%",
+              border: "2px solid #E95144",
+              borderTopColor: "transparent",
+              animation: "spin 0.7s linear infinite",
+            }}
+          />
+          Loading CompactLab…
+        </div>
       </div>
     );
   }
