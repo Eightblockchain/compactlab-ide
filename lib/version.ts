@@ -6,21 +6,22 @@ export const APP_VERSION = "1.0.0";
 // ─── Compact toolchain pins ────────────────────────────────────────────────────
 // Compact CLI `compile +X.Y.Z` selects a *compiler package*. That package
 // implements a *language version* (pragma) and a *runtime version*.
-// Example from `compiler/contract-info.json` for +0.30.0:
-//   { "compiler-version": "0.30.0", "language-version": "0.22.0", "runtime-version": "0.15.0" }
+// Example from `compiler/contract-info.json` for +0.31.1:
+//   { "compiler-version": "0.31.1", "language-version": "0.23.0", "runtime-version": "0.16.0" }
+// Pins follow Midnight docs compatibility matrix (Preview/Preprod latest).
 // User-facing version switching is disabled until v2 admin tooling.
 
 /** Compact compiler package pin — `compact compile +${COMPACT_COMPILER_PACKAGE}`. */
-export const COMPACT_COMPILER_PACKAGE = "0.30.0";
+export const COMPACT_COMPILER_PACKAGE = "0.31.1";
 
 /**
  * Compact language version required by the pinned compiler package.
  * Must match `language-version` in compile output — used in `pragma language_version`.
  */
-export const COMPACT_LANGUAGE_VERSION = "0.22";
+export const COMPACT_LANGUAGE_VERSION = "0.23";
 
 /** Full language version string (major.minor.patch) for exact pragma form. */
-export const COMPACT_LANGUAGE_VERSION_FULL = "0.22.0";
+export const COMPACT_LANGUAGE_VERSION_FULL = "0.23.0";
 
 /** Default pragma line for new .compact files / completions. */
 export const COMPACT_PRAGMA =
@@ -28,7 +29,7 @@ export const COMPACT_PRAGMA =
 
 /**
  * Ensure source uses a pragma compatible with the pinned compiler package.
- * Fixes mistaken `>= 0.30` (compiler package ≠ language version).
+ * Fixes mistaken `>= 0.31` (compiler package ≠ language version).
  */
 export function normalizeCompactPragma(code: string): { code: string; changed: boolean } {
   const pragmaRe = /^(\s*pragma\s+language_version\s*)(>=?\s*)?([\d.]+)(\s*;)/m;
@@ -40,7 +41,7 @@ export function normalizeCompactPragma(code: string): { code: string; changed: b
 
   const requested = match[3];
   const majorMinor = requested.split(".").slice(0, 2).join(".");
-  // Language 0.22 is what +0.30.0 implements. Keep compatible pragmas as-is.
+  // Language 0.23 is what +0.31.1 implements. Keep compatible pragmas as-is.
   if (majorMinor === COMPACT_LANGUAGE_VERSION) {
     return { code, changed: false };
   }

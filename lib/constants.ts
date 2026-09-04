@@ -41,7 +41,7 @@ export const COMPACT_TEMPLATES: Record<TemplateKey, CompactTemplate> = {
   // 01 ─── Hello World ────────────────────────────────────────────────────────
   "hello-world": {
     name: "Hello World",
-    description: "Store a public message on-chain — the simplest Compact contract",
+    description: "Store a public message on-chain. The simplest Compact contract.",
     difficulty: "beginner",
     tags: ["Opaque<string>", "disclose", "ledger"],
     // Note: contracts/, src/, generated/ are injected by buildProject automatically.
@@ -355,7 +355,7 @@ An on-chain counter backed by Compact's built-in \`Counter\` ledger type.
   // 03 ─── Anonymous Voting ───────────────────────────────────────────────────
   voting: {
     name: "Anonymous Voting",
-    description: "Private ballot — who voted is public, what they voted is secret",
+    description: "Private ballot. Who voted is public; what they voted stays secret.",
     difficulty: "beginner",
     tags: ["witness", "Set<T>", "enum", "ownPublicKey"],
     files: [
@@ -564,7 +564,7 @@ The secret never leaves the proof generation step.
   // 05 ─── Owned Contract ─────────────────────────────────────────────────────
   owned: {
     name: "Owned Contract",
-    description: "Admin pattern — access control with a transferable owner role",
+    description: "Admin pattern with a transferable owner role.",
     difficulty: "beginner",
     tags: ["ZswapCoinPublicKey", "ownPublicKey", "admin", "assert"],
     files: [
@@ -766,7 +766,7 @@ An ERC-20 style token with public balances stored in a \`Map\`.
   // 07 ─── Name Registry ──────────────────────────────────────────────────────
   registry: {
     name: "Name Registry",
-    description: "Map Bytes<32> names to owners — register, transfer, release",
+    description: "Map Bytes<32> names to owners. Register, transfer, or release.",
     difficulty: "intermediate",
     tags: ["Map<Bytes<32>,…>", "Counter as ID", "CRUD", "ownership"],
     files: [
@@ -850,7 +850,7 @@ In Compact itself, use: \`pad(32, "literal-string")\`.
   // 08 ─── Player Profile (struct) ────────────────────────────────────────────
   profile: {
     name: "Player Profile",
-    description: "struct types and Map of structs — read, write, and update fields",
+    description: "Struct types and a Map of structs. Read, write, and update fields.",
     difficulty: "intermediate",
     tags: ["struct", "Map<…,struct>", "field access", "update pattern"],
     files: [
@@ -974,7 +974,7 @@ profiles.insert(disclose(caller), disclose(PlayerProfile {
   // 09 ─── Escrow ─────────────────────────────────────────────────────────────
   escrow: {
     name: "Escrow",
-    description: "State-machine escrow with arbiter — enum transitions and role guards",
+    description: "State-machine escrow with arbiter. Enum transitions and role guards.",
     difficulty: "intermediate",
     tags: ["enum state machine", "multi-party", "ZswapCoinPublicKey", "roles"],
     files: [
@@ -1272,22 +1272,23 @@ export function buildPackageJson(projectName: string, contractFile: string): Tem
   "private": true,
   "type": "module",
   "scripts": {
-    "compile":      "compact compile +0.30.0 contracts/${contractFile} contracts/managed/${projectName}",
+    "compile":      "compact compile +0.31.1 contracts/${contractFile} contracts/managed/${projectName}",
     "build":        "tsc",
     "typecheck":    "tsc --noEmit"
   },
   "dependencies": {
-    "@midnight-ntwrk/compact-js":                               "2.5.0",
-    "@midnight-ntwrk/compact-runtime":                          "0.15.0",
+    "@midnight-ntwrk/compact-js":                               "2.5.1",
+    "@midnight-ntwrk/compact-runtime":                          "0.16.0",
     "@midnight-ntwrk/dapp-connector-api":                       "4.0.1",
-    "@midnight-ntwrk/midnight-js-contracts":                    "4.0.4",
-    "@midnight-ntwrk/midnight-js-dapp-connector-proof-provider":"4.0.4",
-    "@midnight-ntwrk/midnight-js-fetch-zk-config-provider":     "4.0.4",
-    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "4.0.4",
-    "@midnight-ntwrk/midnight-js-level-private-state-provider": "4.0.4",
-    "@midnight-ntwrk/midnight-js-network-id":                   "4.0.4",
-    "@midnight-ntwrk/midnight-js-types":                        "4.0.4",
-    "@midnight-ntwrk/midnight-js-utils":                        "4.0.4",
+    "@midnight-ntwrk/midnight-js-protocol":                     "4.1.1",
+    "@midnight-ntwrk/midnight-js-contracts":                    "4.1.1",
+    "@midnight-ntwrk/midnight-js-dapp-connector-proof-provider":"4.1.1",
+    "@midnight-ntwrk/midnight-js-fetch-zk-config-provider":     "4.1.1",
+    "@midnight-ntwrk/midnight-js-indexer-public-data-provider": "4.1.1",
+    "@midnight-ntwrk/midnight-js-level-private-state-provider": "4.1.1",
+    "@midnight-ntwrk/midnight-js-network-id":                   "4.1.1",
+    "@midnight-ntwrk/midnight-js-types":                        "4.1.1",
+    "@midnight-ntwrk/midnight-js-utils":                        "4.1.1",
     "rxjs": "^7.8.1"
   },
   "devDependencies": {
@@ -1411,7 +1412,7 @@ export const SAMPLE_PROJECTS: Array<{
   {
     id: "proj_2",
     name: "Counter",
-    description: "On-chain Counter with increment() — deployable from the IDE.",
+    description: "On-chain Counter with increment(). Deployable from the IDE.",
     template: "counter",
     updatedAt: Date.now() - 1000 * 60 * 60,
   },

@@ -19,6 +19,8 @@ const nextConfig: NextConfig = {
       // re-export shim (that creates a circular resolve and zero exports).
       "@midnight-ntwrk/compact-js": "./node_modules/@midnight-ntwrk/compact-js",
       "@midnight-ntwrk/compact-runtime": "./node_modules/@midnight-ntwrk/compact-runtime",
+      // 4.1.x: app code imports ledger via midnight-js-protocol; keep a single
+      // ledger-v8 instance so CostModel instanceof checks succeed.
       "@midnight-ntwrk/ledger-v8": "./node_modules/@midnight-ntwrk/ledger-v8",
       "@midnight-ntwrk/onchain-runtime-v3": "./node_modules/@midnight-ntwrk/onchain-runtime-v3",
     },
