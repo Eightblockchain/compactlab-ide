@@ -192,18 +192,20 @@ export function OnboardingStrip() {
             checks.compileEnabled === false
               ? "Server Compile is off. Use unedited Hello/Counter, or set COMPACTLAB_ENABLE_COMPILE=true."
               : needsCompile
-                ? "Run Compile (full ZK), then Deploy. Typecheck alone does not unlock Deploy."
-                : "Hello/Counter can Deploy with bundled keys; other projects need Compile first."
+                ? "Run Compile (full ZK), then Deploy. Typecheck alone does not prepare Deploy."
+                : "Hello/Counter can Deploy with bundled keys. Other projects need Compile first."
           }
         />
         {readyToDeploy && (
-          <span className="text-success flex-shrink-0">Ready. Click Deploy</span>
+          <span className="text-success flex-shrink-0 font-medium">
+            Ready for Deploy. Publishing creates a permanent Preprod address.
+          </span>
         )}
         {!readyToDeploy && walletOk && needsCompile && (
-          <span className="text-warning flex-shrink-0">Compile, then Deploy</span>
+          <span className="text-warning flex-shrink-0">Run Compile, then Deploy</span>
         )}
         {!walletOk && (
-          <span className="text-text-muted flex-shrink-0">Connect 1AM (toolbar) to deploy</span>
+          <span className="text-text-muted flex-shrink-0">Connect 1AM in the toolbar to deploy</span>
         )}
       </div>
     </div>

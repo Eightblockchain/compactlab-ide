@@ -12,7 +12,7 @@ import {
   Proof,
   Binding,
   CostModel,
-} from "@midnight-ntwrk/ledger-v8";
+} from "@midnight-ntwrk/midnight-js-protocol/ledger";
 import { FetchZkConfigProvider } from "@midnight-ntwrk/midnight-js-fetch-zk-config-provider";
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
@@ -28,7 +28,7 @@ import type {
 import type {
   FinalizedTransaction,
   TransactionId,
-} from "@midnight-ntwrk/ledger-v8";
+} from "@midnight-ntwrk/midnight-js-protocol/ledger";
 import {
   deployContract,
   findDeployedContract,
@@ -202,8 +202,8 @@ async function loadContractModule(assetBase: string): Promise<any> {
 
 /** Witness names required by Compact-generated Contract constructor checks. */
 async function detectWitnessNames(assetBase: string): Promise<string[]> {
-  const url = `${toAbsoluteAssetUrl(assetBase)}/contract/index.js`;
-  const res = await fetch(url);
+  const url = `${toAbsoluteAssetUrl(assetBase)}/contract/index.js?t=${Date.now()}`;
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) return [];
   const src = await res.text();
   const names = new Set<string>();

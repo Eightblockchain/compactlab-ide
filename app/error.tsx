@@ -31,7 +31,7 @@ export default function Error({
     >
       <p style={{ fontSize: 14, fontWeight: 600 }}>Something went wrong in CompactLab</p>
       <p style={{ fontSize: 12, color: "#8a8a86", maxWidth: 420, lineHeight: 1.5 }}>
-        {error.message || "An unexpected error occurred. Your projects are safe in the cloud — try again."}
+        {error.message || "An unexpected error occurred. Your projects are safe in the cloud. Try again."}
       </p>
       <button
         type="button"

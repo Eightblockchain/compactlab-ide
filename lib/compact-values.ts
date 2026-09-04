@@ -1,7 +1,7 @@
 /**
  * Shared Compact → JS value codec for constructor args, circuit args, and witnesses.
  *
- * Shapes verified against Compact compiler 0.30.0 generated TypeScript / contract-info:
+ * Shapes verified against Compact compiler 0.31.1 generated TypeScript / contract-info:
  * - Boolean → boolean
  * - Uint/Field → bigint
  * - Bytes<N> → Uint8Array

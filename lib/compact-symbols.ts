@@ -399,7 +399,7 @@ export function hoverDocForWord(code: string, word: string): string | null {
   }
 
   const typeDoc: Record<string, string> = {
-    Uint: "Unsigned integer Uint<N> — common sizes: 8, 16, 32, 64, 128.",
+    Uint: "Unsigned integer Uint<N>. Common sizes: 8, 16, 32, 64, 128.",
     Boolean: "Boolean true/false.",
     Bytes: "Fixed-length byte array Bytes<N>.",
     Field: "Field element for arithmetic in circuits.",

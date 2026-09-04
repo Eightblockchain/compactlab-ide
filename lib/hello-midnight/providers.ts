@@ -12,7 +12,7 @@ import {
   Proof,
   Binding,
   CostModel,
-} from "@midnight-ntwrk/ledger-v8";
+} from "@midnight-ntwrk/midnight-js-protocol/ledger";
 import { FetchZkConfigProvider } from "@midnight-ntwrk/midnight-js-fetch-zk-config-provider";
 import { indexerPublicDataProvider } from "@midnight-ntwrk/midnight-js-indexer-public-data-provider";
 import { levelPrivateStateProvider } from "@midnight-ntwrk/midnight-js-level-private-state-provider";
@@ -25,7 +25,7 @@ import type {
   MidnightProvider,
   UnboundTransaction,
 } from "@midnight-ntwrk/midnight-js-types";
-import type { TransactionId } from "@midnight-ntwrk/ledger-v8";
+import type { TransactionId } from "@midnight-ntwrk/midnight-js-protocol/ledger";
 import type { NetworkConfig } from "./types";
 import type { FeeMode } from "@/lib/fee-mode";
 import { apiFetch } from "@/lib/api";

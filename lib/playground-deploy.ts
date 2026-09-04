@@ -3,10 +3,11 @@
 /**
  * playground-deploy — Real contract deployment for playground IDE projects.
  *
- * IMPORTANT: Do not statically import @midnight-ntwrk/ledger-v8 (or contract-runtime).
- * ledger-v8 calls fs.readFileSync at module load; in the browser Turbopack aliases
- * `fs` to an empty shim → "readFileSync is not a function" and /playground 500s.
- * Heavy Midnight SDK code is loaded via dynamic import() only when Deploy runs.
+ * IMPORTANT: Do not statically import @midnight-ntwrk/midnight-js-protocol/ledger
+ * or @midnight-ntwrk/ledger-v8 (or contract-runtime) at module top-level in client
+ * entry points. Ledger WASM/Node paths load fs at import time; in the browser
+ * Turbopack aliases `fs` → empty shim → "readFileSync is not a function" and
+ * /playground 500s. Prefer dynamic import() at Deploy time (see this file).
  *
  * v1 proving is delegated to the 1AM wallet (getProvingProvider) — no Docker
  * proof server on the CompactLab host.
@@ -182,11 +183,11 @@ export async function deployPlaygroundContract(
   stage("prove");
   log("info", "Providers ready. Submitting deploy transaction…");
   if (feeMode === "self") {
-    log("info", "ZK proof generation may take 1–2 minutes inside 1AM. Approve fee payment when prompted.");
+    log("info", "ZK proof generation may take 1 to 2 minutes inside 1AM. Approve fee payment when prompted.");
   } else {
     log(
       "info",
-      "ZK proof generation may take 1–2 minutes inside 1AM. Approve proving when prompted; CompactLab sponsors network fees.",
+      "ZK proof generation may take 1 to 2 minutes inside 1AM. Approve proving when prompted. CompactLab sponsors network fees.",
     );
   }
 
@@ -228,8 +229,17 @@ export async function deployPlaygroundContract(
     const msg = serialize(err);
     log("error", `Deploy transaction failed: ${msg}`);
     const lower = msg.toLowerCase();
+    if (lower.includes("version mismatch") || lower.includes("runtime mismatch")) {
+      log(
+        "warn",
+        "Your ZK artifacts and the playground Compact runtime disagree (often a stale cache after upgrading Compact). Run Compile (ZK) again, hard-refresh the tab, then Deploy.",
+      );
+    }
     if (lower.includes("compact-runtime") || lower.includes("module specifier")) {
-      log("warn", "Contract JS uses bare @midnight-ntwrk/compact-runtime imports; CompactLab rewrites them for the browser. Hard-refresh if you still see this.");
+      log(
+        "warn",
+        "Contract JS uses bare @midnight-ntwrk/compact-runtime imports. CompactLab rewrites them for the browser. Hard-refresh if you still see this.",
+      );
     }
     if (lower.includes("witness") || lower.includes("function-valued field") || lower.includes("private witness")) {
       log(

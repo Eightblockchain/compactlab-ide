@@ -76,13 +76,13 @@ export function DeployConstructorModal({
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="space-y-1.5">
-          <h2 id="deploy-ctor-title" className="text-base font-semibold text-text-primary">
-            Constructor arguments
+        <div className="space-y-2">
+          <h2 id="deploy-ctor-title" className="text-lg font-semibold text-text-primary tracking-tight">
+            Set constructor values
           </h2>
           <p className="text-sm text-text-secondary leading-relaxed">
-            This contract’s constructor runs once at Deploy. Provide the same arguments Compact
-            declares — they become <span className="font-mono text-2xs">deployContract.args</span>.
+            These run once when the contract is created on Preprod. Use the same types Compact
+            declares in the constructor. You cannot change them after Deploy.
           </p>
         </div>
 
@@ -149,7 +149,7 @@ export function DeployConstructorModal({
             disabled={!!err}
             onClick={() => onConfirm(values)}
           >
-            Continue Deploy
+            Continue to Deploy
           </Button>
         </div>
       </div>

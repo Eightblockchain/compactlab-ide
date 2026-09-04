@@ -234,9 +234,9 @@ function SourceScanTab() {
   const circuits = extractCircuits(code);
 
   return (
-    <div className="p-3 space-y-4 animate-[fade-in_0.15s_ease-out]">
+    <div className="p-4 space-y-5 animate-[fade-in_0.15s_ease-out]">
       <PanelHint label="About this map">
-        Regex scan of your Compact text — not compiler analysis. Ledger is public on-chain;
+        Regex scan of your Compact text, not compiler analysis. Ledger is public on-chain;
         witnesses stay off-chain inside proofs.
       </PanelHint>
 

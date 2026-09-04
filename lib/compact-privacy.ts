@@ -57,7 +57,7 @@ export function analyzePrivacy(code: string): PrivacyAnalysis {
       { line: w.line, column: w.column, endColumn: w.endColumn ?? w.column + w.name.length },
       "private",
       w.name,
-      `Witness — stays off-chain unless you disclose a derived value.`,
+      `Witness. Stays off-chain unless you disclose a derived value.`,
     );
     for (const occ of findIdentifierOccurrences(code, w.name)) {
       if (occ.line === w.line && occ.column === w.column) continue;
@@ -72,7 +72,7 @@ export function analyzePrivacy(code: string): PrivacyAnalysis {
       { line: v.line, column: v.column, endColumn: v.endColumn ?? v.column + v.name.length },
       "public",
       v.name,
-      `Ledger — public on-chain state.`,
+      `Ledger. Public on-chain state.`,
     );
     for (const occ of findIdentifierOccurrences(code, v.name)) {
       if (occ.line === v.line && occ.column === v.column) continue;

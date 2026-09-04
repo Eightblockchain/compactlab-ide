@@ -26,7 +26,7 @@ export function LearnPanel() {
     <div className="flex flex-col h-full min-h-0">
       <div className="flex-shrink-0 px-3 pt-1 pb-3 border-b border-border space-y-2">
         <p className="text-xs text-text-secondary leading-relaxed">
-          Concepts and examples from Midnight Compact docs — language{" "}
+          Concepts and examples from Midnight Compact docs. Language{" "}
           <span className="font-mono text-text-primary">{COMPACT_LANGUAGE_VERSION}</span>, compiler{" "}
           <span className="font-mono text-text-primary">+{COMPACT_COMPILER_PACKAGE}</span>.
         </p>

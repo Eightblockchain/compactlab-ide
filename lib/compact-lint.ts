@@ -17,7 +17,7 @@ export function lintCompactSource(code: string): LintDiagnostic[] {
       line: 1,
       column: 1,
       message:
-        "Missing `pragma language_version` — CompactLab will inject one at compile time, but you should declare it explicitly.",
+        "Missing `pragma language_version`. CompactLab will inject one at compile time, but you should declare it explicitly.",
       severity: "warning",
       source: "lint",
       rule: "missing-pragma",
@@ -35,7 +35,7 @@ export function lintCompactSource(code: string): LintDiagnostic[] {
         diagnostics.push({
           line: i + 1,
           column: 1,
-          message: "Unexpected `}` — brace mismatch.",
+          message: "Unexpected `}`. Brace mismatch.",
           severity: "error",
           source: "lint",
           rule: "brace-mismatch",
@@ -48,7 +48,7 @@ export function lintCompactSource(code: string): LintDiagnostic[] {
     diagnostics.push({
       line: lines.length,
       column: 1,
-      message: `${braceDepth} unclosed \`{\` — add closing brace(s).`,
+      message: `${braceDepth} unclosed \`{\`. Add closing brace(s).`,
       severity: "error",
       source: "lint",
       rule: "brace-mismatch",
@@ -117,7 +117,7 @@ function lintDiscloseHeuristic(code: string, diagnostics: LintDiagnostic[]) {
       diagnostics.push({
         line: i + 1,
         column: Math.max(1, line.search(/\.(member|insert|remove|lookup)/) + 1),
-        message: `Possible missing \`disclose()\` — witness \`${w}()\` may flow to this ledger operation. Wrap arguments with disclose() where intentional.`,
+        message: `Possible missing \`disclose()\`. Witness \`${w}()\` may flow to this ledger operation. Wrap arguments with disclose() where intentional.`,
         severity: "warning",
         source: "lint",
         rule: "disclose-heuristic",

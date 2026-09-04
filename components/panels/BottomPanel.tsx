@@ -243,7 +243,7 @@ function CompilePanel() {
             <div className="grid grid-cols-3 gap-2">
               <StatCard
                 label="Keys"
-                value={String(compileResult.artifacts?.keys.length ?? (compileResult.skipZk ? 0 : "—"))}
+                value={String(compileResult.artifacts?.keys.length ?? (compileResult.skipZk ? 0 : "n/a"))}
                 color={compileResult.artifacts?.keys.length ? "accent" : "warning"}
               />
               <StatCard
@@ -261,10 +261,10 @@ function CompilePanel() {
 
           {compileResult.success && compileResult.artifacts && (
             <div className="text-xs font-mono text-text-secondary space-y-1 p-3 bg-surface-2 border border-border rounded-md">
-              <p>contract/: {compileResult.artifacts.contract.join(", ") || "—"}</p>
+              <p>contract/: {compileResult.artifacts.contract.join(", ") || "none"}</p>
               <p>keys/: {compileResult.artifacts.keys.join(", ") || "(empty - not deployable)"}</p>
-              <p>zkir/: {compileResult.artifacts.zkir.join(", ") || "—"}</p>
-              <p>compiler/: {compileResult.artifacts.compiler.join(", ") || "—"}</p>
+              <p>zkir/: {compileResult.artifacts.zkir.join(", ") || "none"}</p>
+              <p>compiler/: {compileResult.artifacts.compiler.join(", ") || "none"}</p>
             </div>
           )}
 
@@ -418,7 +418,7 @@ function NetworkPanel() {
                   )}
                   title="Spendable Dust from 1AM getDustBalance()"
                 >
-                  {wallet.balance ?? "—"}
+                  {wallet.balance ?? "n/a"}
                 </span>
               </div>
               {wallet.dustCap && (

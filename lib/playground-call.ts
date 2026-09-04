@@ -113,7 +113,7 @@ export async function callPlaygroundCircuit(
   await api.join(contractAddress as ContractAddress);
 
   log(addLog, "info", `Calling ${circuitName}(…)…`);
-  log(addLog, "info", "ZK proof generation may take 1–2 minutes inside 1AM.");
+  log(addLog, "info", "ZK proof generation may take 1 to 2 minutes inside 1AM.");
   if (feeMode === "self") {
     log(addLog, "warn", "Approve the transaction fee in 1AM when prompted.");
   } else {
@@ -149,16 +149,10 @@ export async function readPlaygroundState(
   contractAddress: string,
   options?: { artifactBaseUrl?: string | null },
 ): Promise<Record<string, string>> {
-  let assetBase: string;
-  let slug: string;
-  try {
-    ({ assetBase, slug } = resolveAssetBase({
-      template,
-      artifactBaseUrl: options?.artifactBaseUrl,
-    }));
-  } catch {
-    return {};
-  }
+  const { assetBase, slug } = resolveAssetBase({
+    template,
+    artifactBaseUrl: options?.artifactBaseUrl,
+  });
 
   // Dynamic import of SDK pieces that may pull Node-only deps
   const { setNetworkId } = await import("@midnight-ntwrk/midnight-js-network-id");

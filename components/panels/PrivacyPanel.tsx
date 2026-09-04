@@ -65,12 +65,12 @@ export function PrivacyPanel() {
   }
 
   return (
-    <div className="p-3 space-y-4 animate-[fade-in_0.15s_ease-out]">
+    <div className="p-4 space-y-5 animate-[fade-in_0.15s_ease-out]">
       <PanelHint label="Reading this view">
         Witnesses and circuit args stay private. Ledger is public.{" "}
         <span className="font-mono text-accent">disclose()</span> is an intentional leak. Hashes hide
         preimages but stay witness-tainted until disclosed. Spans highlight in the editor while this
-        tab is open — click a row to jump.
+        tab is open. Click a row to jump.
       </PanelHint>
 
       <div className="grid grid-cols-4 gap-1">

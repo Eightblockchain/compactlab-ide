@@ -361,7 +361,7 @@ export circuit get(): Uint<64> {
       "Deploy targets Midnight Preprod. v1 uses Self-pay: fees come from your 1AM tDUST. CompactLab requires the 1AM wallet for proving (getProvingProvider). Flow: Compile (full ZK) then Deploy. Exception: unedited Hello World and Counter ship bundled keys so Deploy works without Compile (you can still Compile if you want).",
     points: [
       "DUST is the shielded fee resource; NIGHT generates DUST. tDUST / tNIGHT are testnet variants.",
-      `Faucet: ${LEARN_FAUCET_URL} — fund tNIGHT and wait for tDUST before Deploy.`,
+      `Faucet: ${LEARN_FAUCET_URL}. Fund tNIGHT and wait for tDUST before Deploy.`,
       "A wallet can hold NIGHT and still have zero DUST if the key was never registered for Dust generation.",
       "Docs warn: Not enough Dust generated to pay the fee until DUST accumulates; more NIGHT → faster DUST generation.",
       "Official deploy guides expect managed artifacts under contracts/managed/<name>/{compiler,contract,keys,zkir}.",
