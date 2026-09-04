@@ -7,6 +7,7 @@ import { extractCircuits, extractLedgerVars, extractWitnesses } from "@/lib/comp
 import { cn, generateId } from "@/lib/utils";
 import { useLaceWallet } from "@/hooks/useLaceWallet";
 import { getDeployGate, getLiveCompactSource } from "@/lib/deploy-gate";
+import { isOutdatedManagedArtifactUrl, OUTDATED_ARTIFACT_MESSAGE } from "@/lib/playground-assets";
 import { oneAmContractUrl, oneAmTxUrl } from "@/lib/explorers";
 import { validateWitnessValues } from "@/lib/playground-witnesses";
 import {
@@ -117,7 +118,10 @@ export function ContractInteractPanel() {
       setStateLoading(true);
       setStateError(null);
       try {
-        if (activeProject?.template || activeProject?.artifactBaseUrl) {
+        if (isOutdatedManagedArtifactUrl(activeProject?.artifactBaseUrl)) {
+          setDecodedState(null);
+          setStateError(OUTDATED_ARTIFACT_MESSAGE);
+        } else if (activeProject?.template || activeProject?.artifactBaseUrl) {
           const { readPlaygroundState } = await import("@/lib/playground-call");
           try {
             const snapshot = await readPlaygroundState(activeProject.template, addr, {
@@ -128,7 +132,9 @@ export function ContractInteractPanel() {
               setStateError(null);
             }
           } catch (err) {
-            setStateError(err instanceof Error ? err.message : "Could not decode ledger");
+            const message = err instanceof Error ? err.message : "Could not decode ledger";
+            setDecodedState(null);
+            setStateError(message);
           }
         }
         const { apiFetch } = await import("@/lib/api");
@@ -324,10 +330,10 @@ export function ContractInteractPanel() {
 
   if (!activeAddress) {
     return (
-      <div className="p-3 space-y-4 animate-[fade-in_0.15s_ease-out]">
+      <div className="p-4 space-y-5 animate-[fade-in_0.15s_ease-out]">
         <PanelEmpty
           title="No contract on chain yet"
-          detail="Compile (ZK), then Deploy from the toolbar. This panel reads Preprod ledger state and sends real circuit transactions through 1AM."
+          detail="Compile (ZK), then use Deploy in the toolbar. Deploy publishes a permanent Preprod address. This panel reads ledger state and sends circuit calls through 1AM."
         />
         {witnesses.length > 0 && (
           <PanelSection title="Private witnesses">
@@ -362,10 +368,22 @@ export function ContractInteractPanel() {
   const ledgerEntries =
     decodedState && Object.keys(decodedState).length > 0
       ? Object.entries(decodedState)
-      : ledgerVars.map((v) => [v.name, decodedState?.[v.name]] as const);
+      : stateError
+        ? []
+        : ledgerVars.map((v) => [v.name, decodedState?.[v.name]] as const);
 
   return (
     <div className="p-3 space-y-4 animate-[fade-in_0.15s_ease-out]">
+      {(isOutdatedManagedArtifactUrl(activeProject?.artifactBaseUrl) ||
+        deployGate.reason === OUTDATED_ARTIFACT_MESSAGE ||
+        stateError === OUTDATED_ARTIFACT_MESSAGE) && (
+        <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2.5 space-y-1">
+          <p className="text-xs font-medium text-warning">Compile artifacts outdated</p>
+          <p className="text-xs text-text-secondary leading-relaxed">
+            {OUTDATED_ARTIFACT_MESSAGE}
+          </p>
+        </div>
+      )}
       <div className="rounded-lg border border-border/80 bg-white/[0.02] px-3 py-2.5 space-y-2">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
@@ -423,12 +441,14 @@ export function ContractInteractPanel() {
           <p className="text-xs text-text-muted py-1">Reading indexer…</p>
         )}
         {stateError && !decodedState && (
-          <p className="text-xs text-error leading-relaxed">{stateError}</p>
+          <div className="rounded-md border border-warning/30 bg-warning/8 px-2.5 py-2 space-y-1">
+            <p className="text-xs text-warning leading-relaxed">{stateError}</p>
+          </div>
         )}
         {!stateLoading && !stateError && ledgerEntries.length === 0 && (
           <p className="text-2xs text-text-dim">No public ledger fields on this contract.</p>
         )}
-        {ledgerEntries.length > 0 && (
+        {!stateError && ledgerEntries.length > 0 && (
           <div className="space-y-1.5">
             {ledgerEntries.map(([name, value]) => {
               const type = ledgerVars.find((v) => v.name === name)?.type;
@@ -442,7 +462,7 @@ export function ContractInteractPanel() {
                     {type && <span className="text-2xs font-mono text-text-dim truncate">{type}</span>}
                   </div>
                   <pre className="mt-1 text-xs font-mono text-success whitespace-pre-wrap break-all max-h-36 overflow-y-auto">
-                    {value ?? "—"}
+                    {value ?? "n/a"}
                   </pre>
                 </div>
               );
@@ -694,7 +714,7 @@ function JoinAnother({
               spellCheck={false}
               className="flex-1 min-w-0 bg-[#0f0f0f] border border-border rounded-md px-2.5 py-1.5 text-xs font-mono text-text-primary placeholder:text-text-dim focus:outline-none focus:border-accent/50"
             />
-            <Button size="sm" onClick={onLoad} disabled={!addressInput.trim()}>
+            <Button size="sm" onClick={() => onLoad()} disabled={!addressInput.trim()}>
               Load
             </Button>
           </div>

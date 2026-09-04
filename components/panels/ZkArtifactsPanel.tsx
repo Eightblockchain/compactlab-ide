@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useIDEStore, type Project } from "@/store/ide";
 import { Button, Badge } from "@/components/ui";
 import { apiFetch, getToken } from "@/lib/api";
-import { bundledAssetBase, isDeployableTemplate } from "@/lib/playground-assets";
+import { bundledAssetBase, isDeployableTemplate, isOutdatedManagedArtifactUrl, OUTDATED_ARTIFACT_MESSAGE } from "@/lib/playground-assets";
 import { cn } from "@/lib/utils";
 
 type ListedFile = { path: string; url: string; bytes?: number };
@@ -108,6 +108,21 @@ export function ZkArtifactsPanel({ className }: { className?: string }) {
       : null;
 
   if (!activeProject) return null;
+
+  if (isOutdatedManagedArtifactUrl(artifactBaseUrl)) {
+    return (
+      <div className={cn("space-y-2", className)}>
+        <p className="text-2xs font-medium text-text-muted uppercase tracking-wide">
+          ZK artifacts
+        </p>
+        <div className="rounded-md border border-warning/40 bg-warning/10 px-2.5 py-2 space-y-1">
+          <p className="text-xs font-medium text-warning">Compile artifacts outdated</p>
+          <p className="text-xs text-text-secondary leading-relaxed">{OUTDATED_ARTIFACT_MESSAGE}</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!artifactBaseUrl && !bundled && localManaged.length === 0) {
     return (
       <div className={cn("space-y-2", className)}>

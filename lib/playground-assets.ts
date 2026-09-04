@@ -8,6 +8,10 @@ export const BUNDLED_DEPLOYABLE = ["hello-world", "counter"] as const;
 export type DeployableTemplate = (typeof BUNDLED_DEPLOYABLE)[number];
 export const DEPLOYABLE_TEMPLATES = BUNDLED_DEPLOYABLE;
 
+/** Shown when a project still points at a pre-signed /v1/zk/<id> URL. */
+export const OUTDATED_ARTIFACT_MESSAGE =
+  "This project's compile artifacts are outdated. Run Compile (full ZK), then open Contract again.";
+
 export function bundledAssetBase(slug: string): string {
   return `/contracts/${slug}`;
 }
@@ -18,20 +22,35 @@ export function managedAssetBase(projectId: string): string {
   return `${api.replace(/\/$/, "")}/v1/zk/${safeId}`;
 }
 
+/** True for API-managed bases that include the signed /a/<token> segment. */
+export function isSignedManagedArtifactUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  if (!/\/v1\/zk\//i.test(url)) return true; // bundled / relative paths are fine
+  return /\/v1\/zk\/[^/]+\/a\/[^/]+/i.test(url);
+}
+
+export function isOutdatedManagedArtifactUrl(url: string | null | undefined): boolean {
+  if (!url) return false;
+  return /\/v1\/zk\//i.test(url) && !isSignedManagedArtifactUrl(url);
+}
+
 export function isDeployableTemplate(template: string): template is DeployableTemplate {
   return (BUNDLED_DEPLOYABLE as readonly string[]).includes(template);
 }
 
-/** True if template is bundled OR the project has a full-ZK artifact URL. */
+/** True if template is bundled OR the project has a usable full-ZK artifact URL. */
 export function canDeployProject(template: string, artifactBaseUrl?: string | null): boolean {
-  return !!artifactBaseUrl || isDeployableTemplate(template);
+  if (artifactBaseUrl) {
+    return !isOutdatedManagedArtifactUrl(artifactBaseUrl);
+  }
+  return isDeployableTemplate(template);
 }
 
 /**
  * Normalize a ZK asset base (relative `/contracts/…` or absolute API URL)
  * into a browser-absolute URL with no trailing slash.
  *
- * Managed compiles return `http://localhost:4000/v1/zk/<id>` from the API —
+ * Managed compiles return `http://…/v1/zk/<id>/a/<token>` from the API —
  * those must NOT be prefixed with `window.location.origin` or `new URL` fails.
  */
 export function toAbsoluteAssetUrl(assetBase: string): string {
@@ -56,6 +75,9 @@ export function resolveAssetBase(options: {
   projectId?: string | null;
 }): { slug: string; assetBase: string } {
   if (options.artifactBaseUrl) {
+    if (isOutdatedManagedArtifactUrl(options.artifactBaseUrl)) {
+      throw new Error(OUTDATED_ARTIFACT_MESSAGE);
+    }
     return {
       slug: options.template || "managed",
       assetBase: options.artifactBaseUrl,

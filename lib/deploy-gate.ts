@@ -6,7 +6,7 @@
  */
 
 import { COMPACT_TEMPLATES } from "@/lib/constants";
-import { isDeployableTemplate } from "@/lib/playground-assets";
+import { isDeployableTemplate, isOutdatedManagedArtifactUrl, OUTDATED_ARTIFACT_MESSAGE } from "@/lib/playground-assets";
 
 export function fingerprintSource(code: string): string {
   const normalized = code.replace(/\r\n/g, "\n").trim();
@@ -68,6 +68,15 @@ export function getDeployGate(options: {
     options.compiledSourceHash === hash;
 
   if (options.artifactBaseUrl) {
+    if (isOutdatedManagedArtifactUrl(options.artifactBaseUrl)) {
+      return {
+        canDeploy: false,
+        needsCompile: true,
+        usingBundled: false,
+        hasCompiled: false,
+        reason: OUTDATED_ARTIFACT_MESSAGE,
+      };
+    }
     if (!options.compiledSourceHash || options.compiledSourceHash !== hash) {
       return {
         canDeploy: false,

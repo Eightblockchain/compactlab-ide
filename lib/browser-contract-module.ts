@@ -14,7 +14,7 @@
  * this module is reachable from client panels and would crash SSR.
  */
 
-import { toAbsoluteAssetUrl } from "@/lib/playground-assets";
+import { toAbsoluteAssetUrl, isOutdatedManagedArtifactUrl, OUTDATED_ARTIFACT_MESSAGE } from "@/lib/playground-assets";
 
 const RUNTIME_GLOBAL = "__MN_COMPACT_RUNTIME__" as const;
 
@@ -62,13 +62,36 @@ export async function loadBrowserContractModule(assetBase: string): Promise<any>
 
   await ensureRuntimeGlobal();
 
-  const url = `${toAbsoluteAssetUrl(assetBase)}/contract/index.js`;
-  const res = await fetch(url);
+  if (isOutdatedManagedArtifactUrl(assetBase)) {
+    throw new Error(OUTDATED_ARTIFACT_MESSAGE);
+  }
+
+  // Bust HTTP caches: project artifact IDs are stable across recompiles, and a
+  // stale contract/index.js (old checkRuntimeVersion) fails Deploy after upgrade.
+  const url = `${toAbsoluteAssetUrl(assetBase)}/contract/index.js?t=${Date.now()}`;
+  const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) {
-    throw new Error(`Failed to fetch contract module (${res.status}): ${url}`);
+    if (res.status === 403) {
+      throw new Error(OUTDATED_ARTIFACT_MESSAGE);
+    }
+    throw new Error(
+      `Could not load contract artifacts (${res.status}). Run Compile (full ZK) and try again.`,
+    );
   }
 
   const src = await res.text();
+  const runtimeGuard = src.match(/checkRuntimeVersion\(\s*['"]([^'"]+)['"]\s*\)/);
+  if (runtimeGuard?.[1]) {
+    const compactRuntime = (globalThis as unknown as Record<string, { versionString?: string }>)[
+      RUNTIME_GLOBAL
+    ];
+    const actual = compactRuntime?.versionString;
+    if (actual && runtimeGuard[1].split(".").slice(0, 2).join(".") !== actual.split(".").slice(0, 2).join(".")) {
+      throw new Error(
+        `Compact runtime mismatch: artifacts expect ${runtimeGuard[1]}, playground has ${actual}. Run Compile (ZK) again, then hard-refresh and Deploy.`,
+      );
+    }
+  }
   const rewritten = rewriteCompactRuntimeImports(src);
   if (rewritten === src && src.includes("@midnight-ntwrk/compact-runtime")) {
     throw new Error(
