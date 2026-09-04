@@ -86,14 +86,36 @@ export interface DeployResult {
   error?: string;
 }
 
-/** Client helper: POST /v1/compile on the shared API. */
+/** Client helper: POST /v1/compile on the shared API (queued + polled). */
 export async function compileCompact(
   code: string,
   options?: { projectId?: string; zk?: boolean },
 ): Promise<CompileResult & { pragmaNormalized?: boolean; normalizedCode?: string }> {
   const { normalizeCompactPragma } = await import("@/lib/version");
   const { code: normalizedCode, changed } = normalizeCompactPragma(code);
-  const { apiFetch, API_BASE } = await import("@/lib/api");
+  const { apiFetch } = await import("@/lib/api");
+
+  const fail = (
+    message: string,
+    extra?: Partial<CompileResult>,
+  ): CompileResult & { pragmaNormalized?: boolean; normalizedCode?: string } => ({
+    success: false,
+    duration: extra?.duration ?? 0,
+    errors: extra?.errors ?? [
+      {
+        line: 1,
+        column: 1,
+        message,
+        severity: "error",
+      },
+    ],
+    warnings: extra?.warnings,
+    installHint: extra?.installHint,
+    mock: false,
+    pragmaNormalized: changed,
+    normalizedCode: changed ? normalizedCode : undefined,
+    error: message,
+  });
 
   const res = await apiFetch("/v1/compile", {
     method: "POST",
@@ -101,67 +123,86 @@ export async function compileCompact(
       code: normalizedCode,
       projectId: options?.projectId,
       zk: options?.zk ?? false,
+      async: true,
     },
   });
-  void API_BASE;
 
   const text = await res.text();
   let body: CompileResult & {
     error?: string;
     installHint?: string;
-    details?: unknown;
+    jobId?: string;
+    status?: string;
+    result?: CompileResult;
   };
   try {
     body = text ? (JSON.parse(text) as typeof body) : ({} as typeof body);
   } catch {
     const snippet = text.trim().slice(0, 180) || res.statusText || "empty response";
+    return fail(`Compile service returned non-JSON (${res.status}): ${snippet}`);
+  }
+
+  if (!res.ok && res.status !== 202) {
+    return fail(
+      body.error ?? body.installHint ?? `Compile service returned ${res.status}`,
+      {
+        duration: body.duration ?? 0,
+        errors: body.errors,
+        warnings: body.warnings,
+        installHint: body.installHint,
+      },
+    );
+  }
+
+  const jobId = body.jobId;
+  if (!jobId) {
+    if (typeof body.success === "boolean") {
+      return {
+        ...body,
+        pragmaNormalized: changed,
+        normalizedCode: changed ? normalizedCode : undefined,
+      };
+    }
+    return fail("Compile service did not return a job id");
+  }
+
+  const started = Date.now();
+  const timeoutMs = options?.zk ? 11 * 60_000 : 45_000;
+
+  while (Date.now() - started < timeoutMs) {
+    const poll = await apiFetch(`/v1/compile/jobs/${jobId}`);
+    const pollText = await poll.text();
+    let job: typeof body;
+    try {
+      job = pollText ? (JSON.parse(pollText) as typeof body) : ({} as typeof body);
+    } catch {
+      return fail(`Compile job poll returned non-JSON (${poll.status})`);
+    }
+    if (!poll.ok) {
+      return fail(job.error ?? `Compile job poll failed (${poll.status})`);
+    }
+
+    if (job.status === "queued" || job.status === "running") {
+      await new Promise((r) => setTimeout(r, job.status === "queued" ? 600 : 900));
+      continue;
+    }
+
+    const outcome = job.result;
+    if (!outcome) {
+      return fail(job.error ?? "Compile finished without a result");
+    }
     return {
-      success: false,
-      duration: 0,
-      errors: [
-        {
-          line: 1,
-          column: 1,
-          message: `Compile service returned non-JSON (${res.status}): ${snippet}`,
-          severity: "error",
-        },
-      ],
-      mock: false,
+      ...outcome,
       pragmaNormalized: changed,
       normalizedCode: changed ? normalizedCode : undefined,
-      error: snippet,
     };
   }
 
-  if (!res.ok) {
-    return {
-      success: false,
-      duration: body.duration ?? 0,
-      errors: body.errors ?? [
-        {
-          line: 1,
-          column: 1,
-          message:
-            body.error ??
-            body.installHint ??
-            `Compile service returned ${res.status}`,
-          severity: "error",
-        },
-      ],
-      warnings: body.warnings,
-      installHint: body.installHint,
-      error: body.error,
-      mock: false,
-      pragmaNormalized: changed,
-      normalizedCode: changed ? normalizedCode : undefined,
-    };
-  }
-
-  return {
-    ...body,
-    pragmaNormalized: changed,
-    normalizedCode: changed ? normalizedCode : undefined,
-  };
+  return fail(
+    options?.zk
+      ? "Compile timed out waiting in the server queue (ZK can take several minutes)."
+      : "Typecheck timed out waiting in the server queue.",
+  );
 }
 
 // Extract circuits from Compact code (source scan — not a real compiler)
