@@ -12,6 +12,7 @@ export type UserPublic = {
   imageUrl: string | null;
   createdAt: string;
   planSlug: PlanSlug;
+  hasPassword?: boolean;
 };
 
 export type Entitlements = {
@@ -98,6 +99,15 @@ export function createBrowserApi() {
     logout: () => request<{ ok: true }>("/v1/auth/logout", { method: "POST" }),
     me: () =>
       request<{ user: UserPublic; entitlements: Entitlements }>("/v1/me"),
+    updateMe: (body: { name?: string | null }) =>
+      request<{ user: UserPublic }>("/v1/me", { method: "PATCH", json: body }),
+    changePassword: (body: { currentPassword: string; newPassword: string }) =>
+      request<{ ok: true; token: string }>("/v1/me/password", {
+        method: "POST",
+        json: body,
+      }),
+    deleteAccount: (body: { password?: string; confirm?: "DELETE" }) =>
+      request<{ ok: true }>("/v1/me", { method: "DELETE", json: body }),
     exchangeOAuthCode: (code: string) =>
       request<{ user: UserPublic; token: string; entitlements: Entitlements }>(
         "/v1/auth/oauth/exchange",

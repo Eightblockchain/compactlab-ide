@@ -4,6 +4,7 @@ import { useRef, useEffect, useCallback, useState } from "react";
 import Editor, { type BeforeMount, type OnMount } from "@monaco-editor/react";
 import type * as Monaco from "monaco-editor";
 import { useIDEStore } from "@/store/ide";
+import { useUserSettings } from "@/lib/user-settings";
 import { compileCompact, makeLog } from "@/lib/compact";
 import { applyDiagnosticsToModel } from "@/lib/compact-diagnostics";
 import { compactEditorBridge } from "@/lib/compact-editor-bridge";
@@ -24,6 +25,8 @@ export function CompactEditor() {
   const lastTypecheckErrorsRef = useRef<{ code: string; errors: NonNullable<import("@/lib/compact").CompileResult["errors"]> } | null>(null);
 
   const [typecheckStatus, setTypecheckStatus] = useState<"idle" | "checking">("idle");
+  const editorFontSize = useUserSettings((s) => s.editorFontSize);
+  const editorTabSize = useUserSettings((s) => s.editorTabSize);
 
   const {
     code,
@@ -207,7 +210,7 @@ export function CompactEditor() {
       addLog(
         makeLog(
           "info",
-          "Updated pragma to language version >= 0.22 (compiler package +0.30.0 implements language 0.22.0).",
+          "Updated pragma to language version >= 0.23 (compiler package +0.31.1 implements language 0.23.0).",
           "compiler",
         ),
       );
@@ -341,10 +344,10 @@ export function CompactEditor() {
           }
           options={{
             fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-            fontSize: 13,
+            fontSize: editorFontSize,
             fontLigatures: true,
-            lineHeight: 22,
-            tabSize: 2,
+            lineHeight: Math.round(editorFontSize * 1.7),
+            tabSize: editorTabSize,
             minimap: { enabled: false },
             scrollbar: {
               vertical: "auto",

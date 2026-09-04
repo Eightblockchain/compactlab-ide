@@ -32,6 +32,13 @@ import {
   type DeployUiStage,
 } from "@/components/modals/DeployProgressModal";
 import { DeployConstructorModal } from "@/components/modals/DeployConstructorModal";
+import { CompactLabLogo } from "@/components/brand/CompactLabLogo";
+import dynamic from "next/dynamic";
+
+const SettingsModal = dynamic(
+  () => import("@/components/modals/SettingsModal").then((m) => m.SettingsModal),
+  { ssr: false },
+);
 
 export function Topbar() {
   const {
@@ -68,6 +75,7 @@ export function Topbar() {
   const lace = useLaceWallet();
   const { user, entitlements, logout, checkout, portal } = useAuth();
   const [deployModalOpen, setDeployModalOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [deployStage, setDeployStage] = useState<DeployUiStage>("connect");
   const [deployStartedAt, setDeployStartedAt] = useState(0);
   const [sponsorPrompt, setSponsorPrompt] = useState<{
@@ -382,7 +390,7 @@ export function Topbar() {
         setCtorPrompt({ params: ctorParams, values: ctorValues, resolve });
       });
       if (!filled) {
-        addLog(makeLog("info", "Deploy cancelled — constructor arguments not provided.", "network"));
+        addLog(makeLog("info", "Deploy cancelled: constructor arguments not provided.", "network"));
         return;
       }
       ctorValues = filled;
@@ -497,7 +505,7 @@ export function Topbar() {
             addLog(
               makeLog(
                 "info",
-                "Deploy cancelled — waiting for Sponsored fees, or try again later.",
+                "Deploy cancelled: waiting for Sponsored fees, or try again later.",
                 "network",
               ),
             );
@@ -517,7 +525,7 @@ export function Topbar() {
         } else {
           failDeploy(
             status?.reason
-              ? `Sponsor unavailable: ${status.reason} Your tDUST is also 0 — wait for the sponsor, or fund Self-pay.`
+              ? `Sponsor unavailable: ${status.reason} Your tDUST is also 0. Wait for the sponsor, or fund Self-pay.`
               : "Sponsor temporarily unavailable and your tDUST is 0; wait or retry later.",
           );
           return;
@@ -526,7 +534,7 @@ export function Topbar() {
         addLog(
           makeLog(
             "info",
-            "Sponsor healthy — deploying with CompactLab-sponsored fees.",
+            "Sponsor healthy. Deploying with CompactLab-sponsored fees.",
             "network",
           ),
         );
@@ -682,16 +690,18 @@ export function Topbar() {
 
   return (
     <>
-    <header className="h-14 flex items-center gap-2 px-4 bg-surface border-b border-border flex-shrink-0">
-      <div className="flex items-center gap-2 mr-3">
-        <div className="w-7 h-7 rounded-md bg-accent flex items-center justify-center flex-shrink-0">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M3 4h4v4H3V4zM9 4h4v4H9V4zM3 9h4v4H3V9z" fill="white" />
-            <path d="M9 9h4v4H9V9z" fill="white" opacity="0.4" />
-          </svg>
-        </div>
-        <span className="font-semibold text-md text-text-primary tracking-tight">CompactLab</span>
-        <span className="text-border-strong text-2xl leading-none select-none">/</span>
+    <header className="min-h-[3.75rem] h-[3.75rem] flex items-center gap-2 px-4 sm:px-5 bg-surface border-b border-border flex-shrink-0">
+      <div className="flex items-center gap-2.5 mr-3 min-w-0">
+        <a
+          href="/playground"
+          className="flex items-center flex-shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+          aria-label="Compact Lab playground"
+        >
+          <CompactLabLogo height={26} className="h-[26px] w-auto max-w-[148px]" />
+        </a>
+        <span className="text-border-strong text-xl leading-none select-none opacity-70" aria-hidden>
+          /
+        </span>
       </div>
 
       <div className="flex items-center gap-2 min-w-0">
@@ -805,18 +815,22 @@ export function Topbar() {
         />
       )}
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5 sm:gap-2">
         <Button
-          variant={walletConnected ? "default" : "default"}
+          variant={walletConnected ? "ghost" : "default"}
           size="md"
           onClick={() => void handleWalletClick()}
           disabled={isRunning || lace.status === "connecting"}
           loading={lace.status === "connecting"}
-          className="gap-1.5"
+          className={cn(
+            "gap-1.5",
+            walletConnected &&
+              "border border-success/25 bg-success/[0.06] text-text-primary hover:bg-success/10",
+          )}
           title={
             walletConnected
               ? "Disconnect 1AM"
-              : "Connect 1AM wallet (required for Deploy/Call). Other wallets are not supported."
+              : "Connect 1AM wallet (required for Deploy and Call). Other wallets are not supported."
           }
         >
           <span
@@ -837,7 +851,7 @@ export function Topbar() {
           className="gap-1.5"
           title={
             compileAllowed
-              ? "Full Compact compile (ZK keys). Required before Deploy except unedited Hello/Counter."
+              ? "Full Compact compile with ZK keys. Required before Deploy except unedited Hello/Counter."
               : "Server Compile is disabled on this host"
           }
         >
@@ -848,28 +862,30 @@ export function Topbar() {
         </Button>
 
         <Button
-          variant="default"
+          variant="ghost"
           size="md"
           onClick={() => void handleCompile(false)}
           loading={status === "compiling"}
           disabled={isRunning || !activeProject || !compileAllowed}
-          className="gap-1.5"
+          className="gap-1.5 hidden sm:inline-flex"
           title={
             compileAllowed
-              ? "Typecheck only (--skip-zk). Does not unlock Deploy."
+              ? "Typecheck only (--skip-zk). Does not prepare Deploy."
               : "Server Compile is disabled on this host"
           }
         >
           Typecheck
         </Button>
 
+        <Divider vertical className="mx-0.5 h-5 self-center hidden sm:block" />
+
         <Button
           variant="accent"
-          size="md"
+          size="lg"
           onClick={() => void handleDeploy()}
           loading={status === "deploying"}
           disabled={!deployEnabled}
-          className="gap-1.5"
+          className="gap-2 px-4 shadow-accent-glow"
           title={
             !activeProject
               ? "Create or open a project first"
@@ -878,20 +894,20 @@ export function Topbar() {
                 : deployGate.reason
           }
         >
-          <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <svg className="w-3.5 h-3.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
             <path d="M6 1v7M3 5l3-4 3 4M1 10h10" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           Deploy
         </Button>
 
         <Button
-          variant="default"
+          variant="ghost"
           size="md"
           onClick={() => void handleExport()}
           loading={exporting}
           disabled={!activeProject || exporting || isRunning}
-          className="gap-1.5"
-          title="Download project as zip (source + deployment.json + managed keys if present)"
+          className="gap-1.5 hidden md:inline-flex"
+          title="Download project as zip (source, deployment.json, and managed keys if present)"
         >
           Export
         </Button>
@@ -905,10 +921,12 @@ export function Topbar() {
             onUpgrade={BILLING_ENABLED ? () => void checkout().catch(() => {}) : undefined}
             onBilling={BILLING_ENABLED ? () => void portal().catch(() => {}) : undefined}
             onLogout={() => void logout()}
+            onOpenSettings={() => setSettingsOpen(true)}
           />
         )}
       </div>
     </header>
+    <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     <SponsorFallbackModal
       open={Boolean(sponsorPrompt)}
       reason={sponsorPrompt?.reason ?? ""}
@@ -983,12 +1001,14 @@ function ProfileMenu({
   onUpgrade,
   onBilling,
   onLogout,
+  onOpenSettings,
 }: {
   user: UserPublic;
   entitlements: Entitlements | null;
   onUpgrade?: () => void;
   onBilling?: () => void;
   onLogout: () => void;
+  onOpenSettings: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -1122,6 +1142,17 @@ function ProfileMenu({
                 Manage billing
               </button>
             )}
+            <button
+              type="button"
+              role="menuitem"
+              className="w-full text-left px-2 py-2 rounded-md text-sm text-text-primary hover:bg-white/6 transition-colors"
+              onClick={() => {
+                setOpen(false);
+                onOpenSettings();
+              }}
+            >
+              Settings
+            </button>
             <button
               type="button"
               role="menuitem"

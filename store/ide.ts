@@ -977,7 +977,11 @@ export const useIDEStore = create<IDEStore>()(
         });
         set({ projectsSyncing: true });
         try {
-          let cloud = await fetchCloudProjects();
+          let cloud = await fetchCloudProjects(
+            new Map(
+              get().projects.map((p) => [p.id, p.witnessValues ?? {}] as const),
+            ),
+          );
 
           // First login: seed Hello World so public users are never at 0 projects.
           if (cloud.length === 0) {

@@ -11,10 +11,11 @@ import {
 } from "@/lib/api";
 import type { CompileResult, DeployResult } from "@/lib/compact";
 import type { Project } from "@/store/ide";
+import { getUserSettingsSnapshot } from "@/lib/user-settings";
 
 const api = () => createBrowserApi();
 
-export function cloudToProject(c: CloudProject): Project {
+export function cloudToProject(c: CloudProject, localWitnesses?: Record<string, string>): Project {
   const deployResult =
     (c.deployResult as DeployResult | null | undefined) ??
     (c.contractAddress
@@ -26,6 +27,11 @@ export function cloudToProject(c: CloudProject): Project {
           duration: 0,
         }
       : null);
+
+  const { syncWitnessesToCloud } = getUserSettingsSnapshot();
+  const witnessValues = syncWitnessesToCloud
+    ? (c.witnessValues ?? {})
+    : (localWitnesses ?? {});
 
   return {
     id: c.id,
@@ -40,7 +46,7 @@ export function cloudToProject(c: CloudProject): Project {
     updatedAt: c.updatedAt,
     compileResult: (c.compileResult as CompileResult | null) ?? null,
     deployResult,
-    witnessValues: c.witnessValues ?? {},
+    witnessValues,
     constructorValues: c.constructorValues ?? {},
     artifactBaseUrl: c.artifactBaseUrl,
     compiledSourceHash: c.compiledSourceHash,
@@ -48,6 +54,7 @@ export function cloudToProject(c: CloudProject): Project {
 }
 
 export function projectToUpsert(p: Project): CloudProjectUpsert {
+  const { syncWitnessesToCloud } = getUserSettingsSnapshot();
   return {
     id: p.id,
     name: p.name,
@@ -63,7 +70,8 @@ export function projectToUpsert(p: Project): CloudProjectUpsert {
     deployTxHash: p.deployResult?.transactionHash ?? null,
     deployBlockNumber: p.deployResult?.blockNumber ?? null,
     deployResult: p.deployResult ?? null,
-    witnessValues: p.witnessValues ?? {},
+    // Privacy: keep witnesses device-local when the user opts out of cloud sync.
+    witnessValues: syncWitnessesToCloud ? (p.witnessValues ?? {}) : {},
     constructorValues: p.constructorValues ?? {},
     compileResult: p.compileResult ?? null,
   };
@@ -103,14 +111,16 @@ function reportSyncError(err: unknown, context: string) {
   syncErrorHandler?.(`${context}: ${message}`);
 }
 
-export async function fetchCloudProjects(): Promise<Project[]> {
+export async function fetchCloudProjects(
+  localById?: Map<string, Record<string, string>>,
+): Promise<Project[]> {
   const { projects } = await api().listProjects(true);
-  return projects.map(cloudToProject);
+  return projects.map((p) => cloudToProject(p, localById?.get(p.id)));
 }
 
 export async function createCloudProject(project: Project): Promise<Project> {
   const { project: created } = await api().createProject(projectToUpsert(project));
-  return cloudToProject(created);
+  return cloudToProject(created, project.witnessValues);
 }
 
 export async function deleteCloudProject(id: string): Promise<void> {
@@ -123,6 +133,8 @@ export async function patchCloudProject(
 ): Promise<Project | null> {
   if (!isProjectSyncEnabled()) return null;
   const { project } = await api().updateProject(id, patch);
+  // Callers discard the return value; when syncing with witnesses opted out,
+  // cloud payload has empty witnesses — do not merge into IDE from this path.
   return cloudToProject(project);
 }
 

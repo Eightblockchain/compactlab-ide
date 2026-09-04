@@ -13,6 +13,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -24,11 +25,18 @@ import {
   type DetectedWallet,
 } from "@/lib/wallet-detect";
 import { readDustBalance, type DustBalanceInfo } from "@/lib/dust-balance";
+import { getUserSettingsSnapshot } from "@/lib/user-settings";
+import {
+  clearWalletRestorePreference,
+  readWalletRestorePreference,
+  writeWalletRestorePreference,
+} from "@/lib/wallet-restore";
 
 export type { DetectedWallet } from "@/lib/wallet-detect";
 export { isOneAmWallet, listMidnightWallets } from "@/lib/wallet-detect";
 /** v1 install link — CompactLab requires 1AM for wallet-side proving. */
 export { MIDNIGHT_WALLET_LINKS } from "@/lib/wallet-links";
+export { clearWalletRestorePreference as clearRestorePreferenceForSettings } from "@/lib/wallet-restore";
 
 export interface UseMidnightWalletReturn {
   availableWallets: DetectedWallet[];
@@ -54,6 +62,8 @@ export type UseLaceWalletReturn = UseMidnightWalletReturn;
 const MidnightWalletContext = createContext<UseMidnightWalletReturn | null>(null);
 
 const TARGET_NETWORK = "preprod";
+/** Silent auto-restore must not block the UI if 1AM waits for approval. */
+const SILENT_CONNECT_TIMEOUT_MS = 8_000;
 
 function serializeErr(err: unknown): string {
   if (err instanceof Error) return err.message || err.name;
@@ -112,6 +122,7 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
   const [walletInfo, setWalletInfo] = useState<WalletInfo | null>(null);
   const [connectedWalletName, setConnectedWalletName] = useState<string | null>(null);
   const [dustBalance, setDustBalance] = useState<DustBalanceInfo | null>(null);
+  const connectGeneration = useRef(0);
 
   const refreshWallets = useCallback(() => {
     setAvailableWallets(listMidnightWallets());
@@ -137,7 +148,15 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
       if (stopped) return;
       const wallets = listMidnightWallets();
       if (wallets.length > 0) {
-        setAvailableWallets(wallets);
+        setAvailableWallets((prev) => {
+          if (
+            prev.length === wallets.length &&
+            prev.every((w, i) => w.id === wallets[i]?.id)
+          ) {
+            return prev;
+          }
+          return wallets;
+        });
       }
       attempts++;
       timer = setTimeout(tick, attempts < 30 ? 500 : 5000);
@@ -169,21 +188,53 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
     };
   }, [connectedAPI, status]);
 
-  const connectTo = useCallback(async (wallet: DetectedWallet): Promise<ConnectedAPI | null> => {
-    setStatus("connecting");
-    setError(null);
+  const connectTo = useCallback(async (
+    wallet: DetectedWallet,
+    options?: { silent?: boolean },
+  ): Promise<ConnectedAPI | null> => {
+    // Silent restore must not flip the whole chrome into "connecting" (feels hung
+    // when 1AM waits on an approval dialog).
+    if (!options?.silent) {
+      setStatus("connecting");
+      setError(null);
+    }
+
+    const generation = ++connectGeneration.current;
+    let timedOut = false;
 
     try {
       if (!isOneAmWallet(wallet.api)) {
         throw new Error("CompactLab v1 only supports the 1AM wallet (https://1am.xyz/).");
       }
 
-      const api: ConnectedAPI = await wallet.api.connect(TARGET_NETWORK);
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
+      const connectPromise = wallet.api.connect(TARGET_NETWORK);
+      const api: ConnectedAPI = options?.silent
+        ? await Promise.race([
+            connectPromise,
+            new Promise<never>((_, reject) => {
+              timeoutId = setTimeout(() => {
+                timedOut = true;
+                reject(new Error("Wallet restore timed out"));
+              }, SILENT_CONNECT_TIMEOUT_MS);
+            }),
+          ]).finally(() => {
+            if (timeoutId) clearTimeout(timeoutId);
+          })
+        : await connectPromise;
+
+      // A timed-out silent restore may still resolve later; ignore stale results.
+      if (generation !== connectGeneration.current || timedOut) {
+        return null;
+      }
+
       await assertUsableConnection(api);
+      if (generation !== connectGeneration.current) return null;
 
       const addresses = await api.getShieldedAddresses();
       const { unshieldedAddress } = await api.getUnshieldedAddress();
       const dust = await readDustBalance(api);
+      if (generation !== connectGeneration.current) return null;
 
       setConnectedAPI(api);
       setConnectedWalletName(wallet.api.name || "1AM");
@@ -195,9 +246,22 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
       });
       setDustBalance(dust);
       setStatus("connected");
+      setError(null);
+      if (getUserSettingsSnapshot().walletRestoreEnabled) {
+        writeWalletRestorePreference(wallet.id);
+      } else {
+        clearWalletRestorePreference();
+      }
       return api;
     } catch (err) {
+      if (generation !== connectGeneration.current) return null;
       const message = serializeErr(err);
+      if (options?.silent) {
+        // Timed-out or rejected restore: stay disconnected, no error banner.
+        setStatus("disconnected");
+        setError(null);
+        return null;
+      }
       setError(message);
       setStatus("error");
       setConnectedAPI(null);
@@ -227,6 +291,8 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
   }, [connectTo]);
 
   const disconnect = useCallback(() => {
+    connectGeneration.current += 1;
+    clearWalletRestorePreference();
     setConnectedAPI(null);
     setWalletInfo(null);
     setConnectedWalletName(null);
@@ -234,6 +300,30 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
     setStatus("disconnected");
     setError(null);
   }, []);
+
+  // After refresh: reconnect last-used 1AM if still authorized (usually no new prompt).
+  // Defer so project hydrate / first paint are not blocked by a wallet prompt.
+  const restoreAttempted = useRef(false);
+  useEffect(() => {
+    if (restoreAttempted.current) return;
+    if (status !== "disconnected") return;
+    if (availableWallets.length === 0) return;
+    if (!getUserSettingsSnapshot().walletRestoreEnabled) return;
+    const pref = readWalletRestorePreference();
+    if (!pref) return;
+    const match =
+      availableWallets.find((w) => w.id === pref.walletId) ?? availableWallets[0];
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      if (cancelled || restoreAttempted.current) return;
+      restoreAttempted.current = true;
+      void connectTo(match, { silent: true });
+    }, 1200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [availableWallets, status, connectTo]);
 
   return useMemo(
     () => ({
