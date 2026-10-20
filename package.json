@@ -8,7 +8,9 @@
     "start": "next start --port 3001",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "smoke:matrix": "npx --yes tsx scripts/smoke-matrix.ts"
+    "smoke:matrix": "npx --yes tsx scripts/smoke-matrix.ts",
+    "templates:check": "npx --yes tsx scripts/templates-check.ts",
+    "test": "vitest run"
   },
   "dependencies": {
     "@midnight-ntwrk/compact-js": "2.5.1",
@@ -49,7 +51,8 @@
     "eslint-config-next": "16.2.2",
     "monaco-editor": "^0.56.0",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^5.0.5"
   },
   "pnpm": {
     "overrides": {
