@@ -24,6 +24,11 @@ import {
   type DeployableTemplate,
 } from "@/lib/playground-assets";
 import { PREPROD_CONFIG } from "@/lib/hello-midnight/types";
+import {
+  isWalletSessionExpiredError,
+  isWalletSessionExpiredMessage,
+  WALLET_SESSION_EXPIRED_MSG,
+} from "@/lib/wallet-session";
 
 export {
   canDeployProject,
@@ -184,6 +189,18 @@ export async function deployPlaygroundContract(
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    if (isWalletSessionExpiredError(err) || isWalletSessionExpiredMessage(msg)) {
+      log("warn", WALLET_SESSION_EXPIRED_MSG);
+      log(
+        "warn",
+        "Deploy paused for reconnect. Click Reconnect 1AM in the toolbar, then Deploy again.",
+      );
+      return {
+        success: false,
+        duration: Date.now() - t0,
+        error: WALLET_SESSION_EXPIRED_MSG,
+      };
+    }
     log("error", `Failed to initialise providers: ${msg}`);
     if (msg.toLowerCase().includes("getprovingprovider") || msg.toLowerCase().includes("1am")) {
       log("warn", "Install and connect 1AM from https://1am.xyz/ (Preprod).");
@@ -239,6 +256,18 @@ export async function deployPlaygroundContract(
     };
 
     const msg = serialize(err);
+    if (isWalletSessionExpiredError(err) || isWalletSessionExpiredMessage(msg)) {
+      log("warn", WALLET_SESSION_EXPIRED_MSG);
+      log(
+        "warn",
+        "Deploy paused for reconnect. Click Reconnect 1AM in the toolbar, then Deploy again.",
+      );
+      return {
+        success: false,
+        duration: Date.now() - t0,
+        error: WALLET_SESSION_EXPIRED_MSG,
+      };
+    }
     log("error", `Deploy transaction failed: ${msg}`);
     const lower = msg.toLowerCase();
     if (lower.includes("version mismatch") || lower.includes("runtime mismatch")) {
