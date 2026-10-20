@@ -280,17 +280,24 @@ const KEYWORD_DOCS: Record<string, string> = {
 
 export function extractLedgerVars(code: string): CompactSymbol[] {
   const vars: CompactSymbol[] = [];
-  const re = /(?:export\s+)?(?:sealed\s+)?ledger\s+(\w+)\s*:\s*([^;]+);/g;
+  // Compact: export? sealed? ledger id : type ;
+  // Only `export ledger` fields appear in the generated TypeScript ledger() helper.
+  const re = /(export\s+)?(sealed\s+)?ledger\s+(\w+)\s*:\s*([^;]+);/g;
   let match: RegExpExecArray | null;
   while ((match = re.exec(code)) !== null) {
-    const type = match[2].trim();
-    const loc = locForName(code, match.index, match[1]);
+    const exported = Boolean(match[1]);
+    const sealed = Boolean(match[2]);
+    const type = match[4].trim();
+    const loc = locForName(code, match.index, match[3]);
     vars.push({
-      name: match[1],
+      name: match[3],
       kind: "ledger",
       type,
-      detail: `ledger ${type}`,
-      documentation: `Public ledger field \`${match[1]}\` (${type}). Stored on-chain.`,
+      isExported: exported,
+      detail: `${exported ? "export " : ""}${sealed ? "sealed " : ""}ledger ${type}`,
+      documentation: exported
+        ? `Exported ledger field \`${match[3]}\` (${type}). Readable via the Contract panel / ledger() helper.`
+        : `Ledger field \`${match[3]}\` (${type}) is on-chain but not exported. Add \`export\` before \`ledger\` to read it from TypeScript / the Contract panel.`,
       ...loc,
     });
   }

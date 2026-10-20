@@ -90,6 +90,22 @@ export function lintCompactSource(code: string): LintDiagnostic[] {
     }
   }
 
+  // Non-exported ledger fields are on-chain but invisible to ledger() / Contract panel.
+  const ledgerRe = /(export\s+)?(sealed\s+)?ledger\s+(\w+)\s*:/g;
+  let lm: RegExpExecArray | null;
+  while ((lm = ledgerRe.exec(code)) !== null) {
+    if (lm[1]) continue;
+    const pos = indexToLineCol(code, lm.index);
+    diagnostics.push({
+      line: pos.line,
+      column: pos.column,
+      message: `Ledger field \`${lm[3]}\` is not exported. Use \`export ledger ${lm[3]}\` if you want the Contract panel / TypeScript ledger() helper to read it.`,
+      severity: "warning",
+      source: "lint",
+      rule: "ledger-export",
+    });
+  }
+
   // Heuristic: witness call result used in ledger op without disclose()
   lintDiscloseHeuristic(code, diagnostics);
 
