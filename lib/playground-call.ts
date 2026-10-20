@@ -30,6 +30,8 @@ export async function callPlaygroundCircuit(
     projectId?: string | null;
     witnessSpecs?: Array<{ name: string; type: string }>;
     witnessValues?: Record<string, string>;
+    /** Witness names this circuit body calls — only these need values for Call. */
+    requiredWitnessNames?: string[];
     circuitParams?: Array<{
       name: string;
       type: string;
@@ -77,11 +79,31 @@ export async function callPlaygroundCircuit(
   }
 
   if (witnessSpecs.length > 0) {
-    const { validateWitnessValues } = await import("@/lib/playground-witnesses");
-    const witnessErr = validateWitnessValues(witnessSpecs, witnessValues);
-    if (witnessErr) {
-      log(addLog, "error", witnessErr);
-      throw new Error(witnessErr);
+    const { validateWitnessValues, witnessSpecsForNames } = await import(
+      "@/lib/playground-witnesses"
+    );
+    const requiredNames = options?.requiredWitnessNames;
+    const requiredSpecs =
+      requiredNames !== undefined
+        ? witnessSpecsForNames(witnessSpecs, requiredNames)
+        : witnessSpecs;
+    if (requiredSpecs.length > 0) {
+      const witnessErr = validateWitnessValues(requiredSpecs, witnessValues);
+      if (witnessErr) {
+        log(addLog, "error", witnessErr);
+        throw new Error(witnessErr);
+      }
+      log(
+        addLog,
+        "info",
+        `${circuitName} uses witness(es): ${requiredSpecs.map((s) => s.name).join(", ")}.`,
+      );
+    } else {
+      log(
+        addLog,
+        "info",
+        `${circuitName} does not call private witnesses — no witness values required for this Call.`,
+      );
     }
   }
 
@@ -108,6 +130,7 @@ export async function callPlaygroundCircuit(
   const api = new PlaygroundContractAPI(providers, slug, assetBase, {
     witnessSpecs,
     witnessValues,
+    requiredWitnessNamesAtCall: options?.requiredWitnessNames,
     typeEnv,
   });
   await api.join(contractAddress as ContractAddress);

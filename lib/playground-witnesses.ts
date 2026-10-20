@@ -164,8 +164,22 @@ export function deserializePrivateState(raw: string): PlaygroundPrivateState | n
 }
 
 /**
+ * Specs for a subset of witness names (e.g. only those the constructor calls).
+ * Prefer typed decls from source; unknown names default to Bytes<32>.
+ */
+export function witnessSpecsForNames(
+  fromSource: WitnessSpec[],
+  names: string[],
+): WitnessSpec[] {
+  if (names.length === 0) return [];
+  const byName = new Map(fromSource.map((s) => [s.name, s]));
+  return names.map((name) => byName.get(name) ?? { name, type: "Bytes<32>" });
+}
+
+/**
  * Merge declared specs with detected constructor witness names.
  * Prefer source specs (have types); fill any extra names as Bytes<32>.
+ * Returns the full union (all source + extras) — for wiring witness fns, not Deploy prompts.
  */
 export function mergeWitnessSpecs(
   fromSource: WitnessSpec[],
