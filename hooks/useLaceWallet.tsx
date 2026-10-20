@@ -31,12 +31,23 @@ import {
   readWalletRestorePreference,
   writeWalletRestorePreference,
 } from "@/lib/wallet-restore";
+import {
+  isWalletSessionExpiredError,
+  probeWalletSession,
+  serializeWalletErr,
+  WALLET_SESSION_EXPIRED_MSG,
+} from "@/lib/wallet-session";
 
 export type { DetectedWallet } from "@/lib/wallet-detect";
 export { isOneAmWallet, listMidnightWallets } from "@/lib/wallet-detect";
 /** v1 install link — CompactLab requires 1AM for wallet-side proving. */
 export { MIDNIGHT_WALLET_LINKS } from "@/lib/wallet-links";
 export { clearWalletRestorePreference as clearRestorePreferenceForSettings } from "@/lib/wallet-restore";
+export {
+  isWalletSessionExpiredError,
+  isWalletSessionExpiredMessage,
+  WALLET_SESSION_EXPIRED_MSG,
+} from "@/lib/wallet-session";
 
 export interface UseMidnightWalletReturn {
   availableWallets: DetectedWallet[];
@@ -52,6 +63,13 @@ export interface UseMidnightWalletReturn {
   connectTo: (wallet: DetectedWallet) => Promise<ConnectedAPI | null>;
   connect: () => Promise<ConnectedAPI | null>;
   disconnect: () => void;
+  /**
+   * Probe the live 1AM session. Returns the API if still valid; otherwise clears
+   * local "connected" state so the UI can prompt Reconnect.
+   */
+  ensureSession: () => Promise<ConnectedAPI | null>;
+  /** Mark the session expired (e.g. after Deploy/Call gets "Connection expired"). */
+  markSessionExpired: (detail?: string) => void;
   /** Re-scan window.midnight after installing/enabling 1AM. */
   refreshWallets: () => void;
 }
@@ -64,16 +82,8 @@ const MidnightWalletContext = createContext<UseMidnightWalletReturn | null>(null
 const TARGET_NETWORK = "preprod";
 /** Silent auto-restore must not block the UI if 1AM waits for approval. */
 const SILENT_CONNECT_TIMEOUT_MS = 8_000;
-
-function serializeErr(err: unknown): string {
-  if (err instanceof Error) return err.message || err.name;
-  if (typeof err === "string") return err;
-  try {
-    return JSON.stringify(err);
-  } catch {
-    return String(err);
-  }
-}
+/** How often to ask 1AM whether the DApp connection is still alive. */
+const SESSION_POLL_MS = 12_000;
 
 async function assertUsableConnection(api: ConnectedAPI): Promise<void> {
   if (typeof api.getProvingProvider !== "function") {
@@ -82,34 +92,19 @@ async function assertUsableConnection(api: ConnectedAPI): Promise<void> {
     );
   }
 
-  if (typeof api.getConnectionStatus !== "function") return;
-
-  let lastStatus: string | undefined;
-  let networkId: string | undefined;
-
+  let last: Awaited<ReturnType<typeof probeWalletSession>> | null = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) {
       await new Promise((r) => setTimeout(r, 250 * attempt));
     }
-    try {
-      const cs = await api.getConnectionStatus();
-      lastStatus = (cs as { status?: string }).status;
-      networkId = (cs as { networkId?: string }).networkId;
-      if (lastStatus === "connected") break;
-    } catch {
-      // retry
-    }
+    last = await probeWalletSession(api, TARGET_NETWORK);
+    if (last.ok || last.reason === "wrong-network") break;
   }
 
-  if (networkId && networkId !== TARGET_NETWORK) {
-    throw new Error(
-      `Connected to network "${networkId}" but CompactLab expects ${TARGET_NETWORK}. Switch to Preprod in 1AM.`,
-    );
-  }
-
-  if (lastStatus && lastStatus !== "connected") {
+  if (last && !last.ok) {
+    if (last.reason === "wrong-network") throw new Error(last.detail);
     console.warn(
-      `[compactlab] Wallet getConnectionStatus() → "${lastStatus}" after connect(); continuing if address APIs work.`,
+      `[compactlab] Wallet session probe after connect(): ${last.detail}; continuing if address APIs work.`,
     );
   }
 }
@@ -128,16 +123,52 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
     setAvailableWallets(listMidnightWallets());
   }, []);
 
+  const clearSessionLocal = useCallback((message: string | null, nextStatus: ConnectionStatus) => {
+    connectGeneration.current += 1;
+    setConnectedAPI(null);
+    setWalletInfo(null);
+    setConnectedWalletName(null);
+    setDustBalance(null);
+    setError(message);
+    setStatus(nextStatus);
+  }, []);
+
+  const markSessionExpired = useCallback(
+    (detail?: string) => {
+      clearSessionLocal(detail?.trim() || WALLET_SESSION_EXPIRED_MSG, "error");
+    },
+    [clearSessionLocal],
+  );
+
+  const ensureSession = useCallback(async (): Promise<ConnectedAPI | null> => {
+    const api = connectedAPI;
+    if (!api || status !== "connected") return null;
+    const probe = await probeWalletSession(api, TARGET_NETWORK);
+    if (probe.ok) return api;
+    clearSessionLocal(
+      probe.reason === "wrong-network" ? probe.detail : WALLET_SESSION_EXPIRED_MSG,
+      "error",
+    );
+    return null;
+  }, [clearSessionLocal, connectedAPI, status]);
+
   const refreshDustBalance = useCallback(async (): Promise<DustBalanceInfo | null> => {
     const api = connectedAPI;
     if (!api) {
       setDustBalance(null);
       return null;
     }
-    const info = await readDustBalance(api);
-    setDustBalance(info);
-    return info;
-  }, [connectedAPI]);
+    try {
+      const info = await readDustBalance(api);
+      setDustBalance(info);
+      return info;
+    } catch (err) {
+      if (isWalletSessionExpiredError(err)) {
+        markSessionExpired();
+      }
+      return null;
+    }
+  }, [connectedAPI, markSessionExpired]);
 
   useEffect(() => {
     let attempts = 0;
@@ -177,8 +208,14 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
     }
     let cancelled = false;
     const pull = async () => {
-      const info = await readDustBalance(connectedAPI);
-      if (!cancelled) setDustBalance(info);
+      try {
+        const info = await readDustBalance(connectedAPI);
+        if (!cancelled) setDustBalance(info);
+      } catch (err) {
+        if (!cancelled && isWalletSessionExpiredError(err)) {
+          markSessionExpired();
+        }
+      }
     };
     void pull();
     const id = setInterval(() => void pull(), 15_000);
@@ -186,7 +223,37 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
       cancelled = true;
       clearInterval(id);
     };
-  }, [connectedAPI, status]);
+  }, [connectedAPI, status, markSessionExpired]);
+
+  // Keep UI honest: 1AM can drop the DApp session while we still show "connected".
+  useEffect(() => {
+    if (!connectedAPI || status !== "connected") return;
+    let cancelled = false;
+
+    const check = async () => {
+      const probe = await probeWalletSession(connectedAPI, TARGET_NETWORK);
+      if (cancelled) return;
+      if (!probe.ok) {
+        markSessionExpired(
+          probe.reason === "wrong-network" ? probe.detail : WALLET_SESSION_EXPIRED_MSG,
+        );
+      }
+    };
+
+    void check();
+    const id = setInterval(() => void check(), SESSION_POLL_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void check();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [connectedAPI, status, markSessionExpired]);
 
   const connectTo = useCallback(async (
     wallet: DetectedWallet,
@@ -255,7 +322,7 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
       return api;
     } catch (err) {
       if (generation !== connectGeneration.current) return null;
-      const message = serializeErr(err);
+      const message = serializeWalletErr(err);
       if (options?.silent) {
         // Timed-out or rejected restore: stay disconnected, no error banner.
         setStatus("disconnected");
@@ -291,15 +358,9 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
   }, [connectTo]);
 
   const disconnect = useCallback(() => {
-    connectGeneration.current += 1;
     clearWalletRestorePreference();
-    setConnectedAPI(null);
-    setWalletInfo(null);
-    setConnectedWalletName(null);
-    setDustBalance(null);
-    setStatus("disconnected");
-    setError(null);
-  }, []);
+    clearSessionLocal(null, "disconnected");
+  }, [clearSessionLocal]);
 
   // After refresh: reconnect last-used 1AM if still authorized (usually no new prompt).
   // Defer so project hydrate / first paint are not blocked by a wallet prompt.
@@ -339,6 +400,8 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
       connectTo,
       connect,
       disconnect,
+      ensureSession,
+      markSessionExpired,
       refreshWallets,
     }),
     [
@@ -353,6 +416,8 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
       connectTo,
       connect,
       disconnect,
+      ensureSession,
+      markSessionExpired,
       refreshWallets,
     ],
   );

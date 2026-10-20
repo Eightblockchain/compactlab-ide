@@ -132,6 +132,17 @@ export async function callPlaygroundCircuit(
     return txResult;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
+    const { isWalletSessionExpiredError, isWalletSessionExpiredMessage, WALLET_SESSION_EXPIRED_MSG } =
+      await import("@/lib/wallet-session");
+    if (isWalletSessionExpiredError(err) || isWalletSessionExpiredMessage(msg)) {
+      log(addLog, "warn", WALLET_SESSION_EXPIRED_MSG);
+      log(
+        addLog,
+        "warn",
+        "Call paused for reconnect. Click Reconnect 1AM in the toolbar, then try the circuit again.",
+      );
+      throw new Error(WALLET_SESSION_EXPIRED_MSG);
+    }
     const lower = msg.toLowerCase();
     if (lower.includes("not the current owner")) {
       log(

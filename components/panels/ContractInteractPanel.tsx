@@ -5,7 +5,11 @@ import { useIDEStore } from "@/store/ide";
 import { Badge, Button, StatusDot } from "@/components/ui";
 import { extractCircuits, extractLedgerVars, extractWitnesses } from "@/lib/compact";
 import { cn, generateId } from "@/lib/utils";
-import { useLaceWallet } from "@/hooks/useLaceWallet";
+import {
+  useLaceWallet,
+  isWalletSessionExpiredMessage,
+  WALLET_SESSION_EXPIRED_MSG,
+} from "@/hooks/useLaceWallet";
 import { getDeployGate, getLiveCompactSource } from "@/lib/deploy-gate";
 import { isOutdatedManagedArtifactUrl, OUTDATED_ARTIFACT_MESSAGE } from "@/lib/playground-assets";
 import { oneAmContractUrl, oneAmTxUrl } from "@/lib/explorers";
@@ -250,6 +254,24 @@ export function ContractInteractPanel() {
     setBottomPanelOpen(true);
 
     try {
+      const liveApi = await lace.ensureSession();
+      if (!liveApi) {
+        const msg =
+          lace.error && isWalletSessionExpiredMessage(lace.error)
+            ? lace.error
+            : WALLET_SESSION_EXPIRED_MSG;
+        addLog({
+          id: generateId(),
+          timestamp: Date.now(),
+          level: "warn",
+          message: `${msg} Reconnect 1AM, then try the circuit again.`,
+          source: "network",
+        });
+        setLastResult({ success: false, message: msg });
+        setCallingCircuit(null);
+        return;
+      }
+
       const { callPlaygroundCircuit } = await import("@/lib/playground-call");
       const feeMode = normalizeFeeMode(useIDEStore.getState().feeMode);
       if (feeMode === "self" && lace.dustBalance?.isEmpty) {
@@ -267,7 +289,7 @@ export function ContractInteractPanel() {
         return;
       }
       const result = await callPlaygroundCircuit(
-        lace.connectedAPI!,
+        liveApi,
         activeProject!.template,
         activeAddress,
         selected.name,
@@ -296,14 +318,22 @@ export function ContractInteractPanel() {
       void refreshUntilSettled(activeAddress);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      setLastResult({ success: false, message: msg });
-      addLog({
-        id: generateId(),
-        timestamp: Date.now(),
-        level: "error",
-        message: `Circuit call failed: ${msg}`,
-        source: "network",
-      });
+      if (isWalletSessionExpiredMessage(msg)) {
+        lace.markSessionExpired(WALLET_SESSION_EXPIRED_MSG);
+        setLastResult({
+          success: false,
+          message: "1AM connection expired. Reconnect, then try again.",
+        });
+      } else {
+        setLastResult({ success: false, message: msg });
+        addLog({
+          id: generateId(),
+          timestamp: Date.now(),
+          level: "error",
+          message: `Circuit call failed: ${msg}`,
+          source: "network",
+        });
+      }
     }
 
     setCallingCircuit(null);
@@ -313,8 +343,7 @@ export function ContractInteractPanel() {
     circuitInputs,
     canCallOnChain,
     callBlockedReason,
-    lace.connectedAPI,
-    lace.dustBalance?.isEmpty,
+    lace,
     activeProject,
     activeAddress,
     witnesses,

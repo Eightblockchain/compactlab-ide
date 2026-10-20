@@ -4,7 +4,11 @@ import { useIDEStore } from "@/store/ide";
 import { Button, StatusDot, Divider } from "@/components/ui";
 import { cn, generateId } from "@/lib/utils";
 import { useState, useRef, useEffect, useCallback } from "react";
-import { useLaceWallet } from "@/hooks/useLaceWallet";
+import {
+  useLaceWallet,
+  isWalletSessionExpiredMessage,
+  WALLET_SESSION_EXPIRED_MSG,
+} from "@/hooks/useLaceWallet";
 import { useAuth } from "@/hooks/useAuth";
 import type { DeployResult } from "@/lib/compact";
 import { compileCompact, makeLog, extractWitnesses } from "@/lib/compact";
@@ -121,7 +125,14 @@ export function Topbar() {
 
   useEffect(() => {
     if (lace.status === "error" && lace.error) {
-      addLog(makeLog("error", `Wallet: ${lace.error}`, "network"));
+      const expired = isWalletSessionExpiredMessage(lace.error);
+      addLog(
+        makeLog(
+          expired ? "warn" : "error",
+          expired ? lace.error : `Wallet: ${lace.error}`,
+          "network",
+        ),
+      );
       setLogTab("network");
       setBottomPanelOpen(true);
     }
@@ -440,9 +451,23 @@ export function Topbar() {
       );
     }
 
+    setDeployStage("connect");
     let connectedAPI = lace.connectedAPI;
-    if (!connectedAPI) {
-      setDeployStage("connect");
+    if (connectedAPI) {
+      connectedAPI = await lace.ensureSession();
+      if (!connectedAPI) {
+        addLog(
+          makeLog(
+            "warn",
+            "1AM session expired. Reconnect, then Deploy again — your setup inputs are unchanged.",
+            "network",
+          ),
+        );
+        setDeployModalOpen(false);
+        setStatus("idle");
+        return;
+      }
+    } else {
       addLog(makeLog("info", "Connecting to 1AM wallet…", "network"));
       connectedAPI = await lace.connect();
       if (!connectedAPI) {
@@ -594,6 +619,25 @@ export function Topbar() {
       outcome = { success: false, duration: Date.now() - started, error: message };
     }
 
+    if (
+      !outcome.success &&
+      outcome.error &&
+      isWalletSessionExpiredMessage(outcome.error)
+    ) {
+      lace.markSessionExpired(WALLET_SESSION_EXPIRED_MSG);
+      outcome = {
+        ...outcome,
+        error: "1AM connection expired. Reconnect, then click Deploy again.",
+      };
+      addLog(
+        makeLog(
+          "warn",
+          "Deploy paused: 1AM session expired. Reconnect from the toolbar, then Deploy again.",
+          "network",
+        ),
+      );
+    }
+
     setDeployResult(outcome);
     setStatus("idle");
     setDeployModalOpen(true);
@@ -638,6 +682,10 @@ export function Topbar() {
   const compileAllowed = entitlements?.compileAllowed !== false;
   const deployEnabled = !isRunning && !!activeProject && deployGate.canDeploy;
   const walletConnected = lace.status === "connected" && !!lace.connectedAPI;
+  const needsReconnect =
+    !walletConnected &&
+    !!lace.error &&
+    isWalletSessionExpiredMessage(lace.error);
   const walletLabel =
     lace.walletInfo?.unshieldedAddress
       ? `${lace.walletInfo.unshieldedAddress.slice(0, 6)}…${lace.walletInfo.unshieldedAddress.slice(-4)}`
@@ -651,7 +699,15 @@ export function Topbar() {
     }
     setLogTab("network");
     setBottomPanelOpen(true);
-    addLog(makeLog("info", "Connecting to 1AM (only supported wallet)…", "network"));
+    addLog(
+      makeLog(
+        "info",
+        needsReconnect
+          ? "Reconnecting to 1AM…"
+          : "Connecting to 1AM (only supported wallet)…",
+        "network",
+      ),
+    );
     const api = await lace.connect();
     if (!api) {
       addLog(
@@ -664,7 +720,7 @@ export function Topbar() {
       );
       return;
     }
-    addLog(makeLog("success", "1AM connected.", "network"));
+    addLog(makeLog("success", needsReconnect ? "1AM reconnected." : "1AM connected.", "network"));
   };
 
   const handleExport = async () => {
@@ -826,20 +882,24 @@ export function Topbar() {
             "gap-1.5",
             walletConnected &&
               "border border-success/25 bg-success/[0.06] text-text-primary hover:bg-success/10",
+            needsReconnect &&
+              "border border-warning/40 bg-warning/[0.08] text-text-primary hover:bg-warning/15",
           )}
           title={
             walletConnected
               ? "Disconnect 1AM"
-              : "Connect 1AM wallet (required for Deploy and Call). Other wallets are not supported."
+              : needsReconnect
+                ? lace.error ?? WALLET_SESSION_EXPIRED_MSG
+                : "Connect 1AM wallet (required for Deploy and Call). Other wallets are not supported."
           }
         >
           <span
             className={cn(
               "w-1.5 h-1.5 rounded-full",
-              walletConnected ? "bg-success" : "bg-text-muted",
+              walletConnected ? "bg-success" : needsReconnect ? "bg-warning" : "bg-text-muted",
             )}
           />
-          {walletConnected ? walletLabel : "Connect 1AM"}
+          {walletConnected ? walletLabel : needsReconnect ? "Reconnect 1AM" : "Connect 1AM"}
         </Button>
 
         <Button
