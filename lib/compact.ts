@@ -217,11 +217,17 @@ export function extractCircuits(code: string): CircuitMeta[] {
 }
 
 // Extract ledger variables from code (source scan)
-export function extractLedgerVars(code: string): { name: string; type: string; isPublic: boolean }[] {
+export function extractLedgerVars(code: string): {
+  name: string;
+  type: string;
+  isPublic: boolean;
+  isExported: boolean;
+}[] {
   return scanLedgerVars(code).map((v) => ({
     name: v.name,
     type: v.type ?? "Unknown",
     isPublic: true,
+    isExported: v.isExported === true,
   }));
 }
 

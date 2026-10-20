@@ -127,10 +127,8 @@ export function ContractInteractPanel() {
             const snapshot = await readPlaygroundState(activeProject.template, addr, {
               artifactBaseUrl: activeProject.artifactBaseUrl,
             });
-            if (Object.keys(snapshot).length > 0) {
-              setDecodedState(snapshot);
-              setStateError(null);
-            }
+            setDecodedState(snapshot);
+            setStateError(null);
           } catch (err) {
             const message = err instanceof Error ? err.message : "Could not decode ledger";
             setDecodedState(null);
@@ -368,9 +366,14 @@ export function ContractInteractPanel() {
   const ledgerEntries =
     decodedState && Object.keys(decodedState).length > 0
       ? Object.entries(decodedState)
-      : stateError
-        ? []
-        : ledgerVars.map((v) => [v.name, decodedState?.[v.name]] as const);
+      : [];
+  const exportedLedgerVars = ledgerVars.filter((v) => v.isExported);
+  const privateLedgerVars = ledgerVars.filter((v) => !v.isExported);
+  const showExportHint =
+    !stateLoading &&
+    !stateError &&
+    ledgerEntries.length === 0 &&
+    privateLedgerVars.length > 0;
 
   return (
     <div className="p-3 space-y-4 animate-[fade-in_0.15s_ease-out]">
@@ -445,8 +448,30 @@ export function ContractInteractPanel() {
             <p className="text-xs text-warning leading-relaxed">{stateError}</p>
           </div>
         )}
-        {!stateLoading && !stateError && ledgerEntries.length === 0 && (
-          <p className="text-2xs text-text-dim">No public ledger fields on this contract.</p>
+        {!stateLoading && !stateError && ledgerEntries.length === 0 && !showExportHint && (
+          <p className="text-2xs text-text-dim">
+            {ledgerVars.length === 0
+              ? "No public ledger fields on this contract."
+              : exportedLedgerVars.length === 0
+                ? "No exported ledger fields to display."
+                : "No ledger values from the indexer yet. Refresh in a few seconds."}
+          </p>
+        )}
+        {showExportHint && (
+          <div className="rounded-md border border-border/70 bg-white/[0.02] px-2.5 py-2 space-y-1.5">
+            <p className="text-xs text-text-secondary leading-relaxed">
+              On-chain ledger fields exist, but none are exported for TypeScript reads. Compact only
+              exposes fields declared as{" "}
+              <span className="font-mono text-text-primary">export ledger …</span> via{" "}
+              <span className="font-mono text-text-primary">ledger()</span>.
+            </p>
+            <p className="text-2xs text-text-dim leading-relaxed">
+              Not exported: {privateLedgerVars.map((v) => v.name).join(", ")}. Add{" "}
+              <span className="font-mono">export</span> before each{" "}
+              <span className="font-mono">ledger</span>, Compile (ZK), and Deploy again to inspect
+              values here.
+            </p>
+          </div>
         )}
         {!stateError && ledgerEntries.length > 0 && (
           <div className="space-y-1.5">
@@ -462,7 +487,7 @@ export function ContractInteractPanel() {
                     {type && <span className="text-2xs font-mono text-text-dim truncate">{type}</span>}
                   </div>
                   <pre className="mt-1 text-xs font-mono text-success whitespace-pre-wrap break-all max-h-36 overflow-y-auto">
-                    {value ?? "n/a"}
+                    {value}
                   </pre>
                 </div>
               );

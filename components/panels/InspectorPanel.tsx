@@ -252,7 +252,12 @@ function SourceScanTab() {
         ) : (
           <div className="space-y-1">
             {ledgerVars.map((v) => (
-              <ScanRow key={v.name} name={v.name} type={v.type} badge="public" />
+              <ScanRow
+                key={v.name}
+                name={v.name}
+                type={v.type}
+                badge={v.isExported ? "export" : "ledger"}
+              />
             ))}
           </div>
         )}
@@ -329,21 +334,22 @@ function ScanRow({
 }: {
   name: string;
   type: string;
-  badge: "public" | "private";
+  badge: "public" | "private" | "export" | "ledger";
 }) {
+  const ok = badge === "public" || badge === "export";
   return (
     <div className="flex items-center gap-2 rounded-md border border-border/60 bg-white/[0.02] px-2.5 py-2">
       <span
         className={cn(
           "w-1 h-1 rounded-full shrink-0",
-          badge === "public" ? "bg-success" : "bg-warning",
+          ok ? "bg-success" : "bg-warning",
         )}
       />
       <span className="text-xs font-mono text-text-primary truncate flex-1">{name}</span>
       <span
         className={cn(
           "text-2xs font-mono truncate max-w-[45%]",
-          badge === "public" ? "text-success/80" : "text-warning/80",
+          ok ? "text-success/80" : "text-warning/80",
         )}
       >
         {type}
