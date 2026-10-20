@@ -4,12 +4,10 @@
  * exposed by generated `ledger()`.
  */
 
+import { formatBytesForDisplay } from "@/lib/compact-values";
+
 const MAX_DEPTH = 8;
 const MAX_ENTRIES = 80;
-
-function toHex(bytes: Uint8Array): string {
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-}
 
 function isIterable(value: object): value is Iterable<unknown> {
   return typeof (value as { [Symbol.iterator]?: unknown })[Symbol.iterator] === "function";
@@ -28,7 +26,7 @@ export function compactRuntimeToJson(
   if (typeof value === "string" || typeof value === "boolean") return value;
   if (typeof value === "number") return Number.isFinite(value) ? value : String(value);
   if (typeof value === "function" || typeof value === "symbol") return undefined;
-  if (value instanceof Uint8Array) return toHex(value);
+  if (value instanceof Uint8Array) return formatBytesForDisplay(value);
 
   if (Array.isArray(value)) {
     return value.slice(0, MAX_ENTRIES).map((item) => compactRuntimeToJson(item, depth + 1, seen));
@@ -61,7 +59,7 @@ export function compactRuntimeToJson(
   const rec = value as Record<string, unknown>;
 
   if (rec.bytes instanceof Uint8Array) {
-    return toHex(rec.bytes);
+    return formatBytesForDisplay(rec.bytes);
   }
 
   if (typeof rec.is_some === "boolean") {
