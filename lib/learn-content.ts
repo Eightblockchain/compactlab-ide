@@ -73,7 +73,7 @@ export circuit storeMessage(newMessage: Opaque<"string">): [] {
   {
     id: "pragma-vs-compiler",
     title: "Pragma vs compiler package",
-    whenStuck: "0.22 vs +0.30.0 errors",
+    whenStuck: "0.23 vs +0.31.1 errors",
     concept: `pragma language_version declares which Compact language your source targets. The compiler package is selected separately (for example compact compile +${COMPACT_COMPILER_PACKAGE}). CompactLab pins language ${COMPACT_LANGUAGE_VERSION} / ${COMPACT_LANGUAGE_VERSION_FULL} with compiler package ${COMPACT_COMPILER_PACKAGE}. Do not write pragma language_version ${COMPACT_COMPILER_PACKAGE} - that confuses package with language.`,
     points: [
       `Tutorials use pragma language_version ${COMPACT_LANGUAGE_VERSION} (or >= ${COMPACT_LANGUAGE_VERSION}) to lock the Compact language.`,

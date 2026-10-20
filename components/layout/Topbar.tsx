@@ -245,7 +245,7 @@ export function Topbar() {
       addLog(
         makeLog(
           "info",
-          "Updated pragma to language version >= 0.22 (compiler package +0.30.0 implements language 0.22.0).",
+          "Updated pragma to language version >= 0.23 (compiler package +0.31.1 implements language 0.23.0).",
           "compiler",
         ),
       );
