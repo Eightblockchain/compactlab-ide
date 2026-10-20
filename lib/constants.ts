@@ -354,10 +354,10 @@ An on-chain counter backed by Compact's built-in \`Counter\` ledger type.
 
   // 03 ─── Anonymous Voting ───────────────────────────────────────────────────
   voting: {
-    name: "Anonymous Voting",
-    description: "Private ballot. Who voted is public; what they voted stays secret.",
+    name: "Simple Voting",
+    description: "One vote per wallet. Shows why a witness that drives a public tally must be disclosed.",
     difficulty: "beginner",
-    tags: ["witness", "Set<T>", "enum", "ownPublicKey"],
+    tags: ["witness", "disclose", "Set<T>", "enum", "ownPublicKey"],
     files: [
       {
         name: "voting.compact",
@@ -367,16 +367,19 @@ An on-chain counter backed by Compact's built-in \`Counter\` ledger type.
 
 import CompactStandardLibrary;
 
-// Anonymous on-chain voting.
+// Simple on-chain voting, one vote per wallet.
 //
 // Privacy model:
 //  - WHO voted: public (ZswapCoinPublicKey in a Set prevents double-voting)
-//  - WHAT they voted: PRIVATE (witness — never written to the ledger)
-//  - The ZK proof shows a valid binary choice was made without revealing it
+//  - WHAT they voted: also public. The choice comes from a witness, but it
+//    decides which public counter goes up, so anyone watching the ledger
+//    learns it. The compiler rejects this unless the choice is wrapped in
+//    disclose(), which makes the leak explicit.
 //
 // Concepts covered:
 //  - enum: named states, used here as a voting status flag
-//  - witness: private input provided off-chain by the caller's TypeScript wallet
+//  - witness: input provided off-chain by the caller's TypeScript wallet
+//  - disclose(): required when a witness value can reach public state
 //  - Set<T>: built-in collection for membership (no duplicates)
 //  - Counter: append-only tally
 //  - ownPublicKey(): the ZswapCoinPublicKey of the transaction caller
@@ -388,8 +391,7 @@ export ledger votesFor: Counter;
 export ledger votesAgainst: Counter;
 export ledger voters: Set<ZswapCoinPublicKey>;
 
-// The caller supplies their vote choice entirely off-chain.
-// The ZK proof shows a valid Boolean was provided — without revealing it.
+// The caller supplies their vote choice off-chain.
 witness voteChoice(): Boolean;
 
 constructor() {
@@ -407,9 +409,10 @@ export circuit castVote(): [] {
   // ownPublicKey() is inherently public — disclose() is still required for Set.insert.
   voters.insert(disclose(voter));
 
-  // The choice is consumed inside the ZK circuit. It never appears on-chain.
+  // Branching on the choice changes a public counter, so the choice is
+  // disclosed. Hiding votes needs a different design (e.g. commit-reveal).
   const choice = voteChoice();
-  if (choice) {
+  if (disclose(choice)) {
     votesFor.increment(1);
   } else {
     votesAgainst.increment(1);
@@ -426,16 +429,17 @@ export circuit closeVoting(): [] {
       {
         name: "README.md",
         language: "markdown",
-        content: `# Anonymous Voting
+        content: `# Simple Voting
 
-A zero-knowledge voting system where ballot choices are provably secret.
+One vote per wallet, with public tallies. A good first look at how the
+compiler tracks witness values that reach public state.
 
 ## Privacy model
 
 | Data | On-chain? | Why |
 |---|---|---|
 | Who voted | Yes | Stored in \`voters: Set<ZswapCoinPublicKey>\` to prevent double-voting |
-| Vote choice | No | Stays in the witness; only the tally changes |
+| Vote choice | Yes | It decides which public counter is incremented, so it must be \`disclose()\`d |
 | Tallies | Yes | \`votesFor\` and \`votesAgainst\` are public Counters |
 
 ## Concepts
@@ -443,18 +447,17 @@ A zero-knowledge voting system where ballot choices are provably secret.
 | Concept | Code |
 |---|---|
 | Enum state | \`export enum VotingState { Open, Closed }\` |
-| Private witness | \`witness voteChoice(): Boolean;\` |
+| Witness input | \`witness voteChoice(): Boolean;\` |
+| Explicit disclosure | \`if (disclose(choice)) { ... }\` |
 | Set membership | \`voters.member(voter)\` / \`voters.insert(disclose(voter))\` |
 | Caller identity | \`ownPublicKey(): ZswapCoinPublicKey\` |
 
-## How the ZK proof works
+## Why disclose() is required
 
-The caller's wallet generates a proof that:
-1. A valid \`Boolean\` was provided as \`voteChoice\`
-2. The caller has not voted before (not in \`voters\`)
-3. The correct counter was incremented
-
-The choice itself never appears in the proof transcript.
+Remove \`disclose()\` from \`if (disclose(choice))\` and compile: the compiler
+reports a "potential witness-value disclosure". Incrementing \`votesFor\` or
+\`votesAgainst\` is a public ledger change, so it reveals the boolean. A truly
+secret ballot needs a different design, such as commit-reveal or hidden tallies.
 `,
       },
     ],
@@ -674,18 +677,19 @@ import CompactStandardLibrary;
 //
 // Concepts covered:
 //  - sealed ledger: written once in constructor, permanently immutable
+//  - pad(n, "text"): a string literal is Bytes<len>, pad() widens it to Bytes<n>
 //  - Map<K, V>: .member(k), .lookup(k), .insert(k, v) — the core Compact dictionary
 //  - Uint<128> arithmetic: must cast back with "as Uint<128>" after + or -
 //  - disclose() on both key and value when inserting into a Map from a circuit
 
-export sealed ledger tokenName: Opaque<"string">;
-export sealed ledger tokenSymbol: Opaque<"string">;
+export sealed ledger tokenName: Bytes<32>;
+export sealed ledger tokenSymbol: Bytes<32>;
 export ledger totalSupply: Uint<128>;
 export ledger balances: Map<ZswapCoinPublicKey, Uint<128>>;
 
 constructor() {
-  tokenName = "MidToken";
-  tokenSymbol = "MDT";
+  tokenName = pad(32, "MidToken");
+  tokenSymbol = pad(32, "MDT");
   const initialSupply: Uint<128> = 1000000;
   totalSupply = initialSupply;
   // Give all initial tokens to the deployer.
@@ -739,8 +743,8 @@ An ERC-20 style token with public balances stored in a \`Map\`.
 
 | Ledger | Type | Notes |
 |---|---|---|
-| \`tokenName\` | \`sealed Opaque<"string">\` | Set once in constructor |
-| \`tokenSymbol\` | \`sealed Opaque<"string">\` | Set once in constructor |
+| \`tokenName\` | \`sealed Bytes<32>\` | Set once in constructor with \`pad(32, "MidToken")\` |
+| \`tokenSymbol\` | \`sealed Bytes<32>\` | Set once in constructor with \`pad(32, "MDT")\` |
 | \`totalSupply\` | \`Uint<128>\` | Updated on mint |
 | \`balances\` | \`Map<ZswapCoinPublicKey, Uint<128>>\` | Account → balance |
 
@@ -748,7 +752,8 @@ An ERC-20 style token with public balances stored in a \`Map\`.
 
 | Concept | Code |
 |---|---|
-| Sealed (immutable) ledger | \`export sealed ledger tokenName: Opaque<"string">;\` |
+| Sealed (immutable) ledger | \`export sealed ledger tokenName: Bytes<32>;\` |
+| String literal to bytes | \`pad(32, "MidToken")\` |
 | Map member check | \`balances.member(sender)\` |
 | Map read | \`balances.lookup(sender)\` |
 | Map write | \`balances.insert(disclose(k), disclose(v))\` |
