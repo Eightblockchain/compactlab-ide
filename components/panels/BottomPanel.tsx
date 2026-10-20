@@ -126,11 +126,13 @@ function LogLine({ log, index }: { log: LogEntry; index: number }) {
     debug: "· ",
   };
 
+  const isTypeHint = log.source === "typecheck";
+
   return (
     <div
       className={cn(
         "flex items-start gap-2 leading-relaxed terminal-line",
-        colors[log.level]
+        isTypeHint ? "text-text-muted" : colors[log.level],
       )}
       style={{ animationDelay: `${index * 15}ms` }}
     >
@@ -139,7 +141,7 @@ function LogLine({ log, index }: { log: LogEntry; index: number }) {
       </span>
       {log.source && (
         <span className="flex-shrink-0 text-text-dim opacity-60">
-          [{log.source}]
+          [{isTypeHint ? "hint" : log.source}]
         </span>
       )}
       <span>

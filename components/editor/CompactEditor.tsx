@@ -9,6 +9,7 @@ import { compileCompact, makeLog } from "@/lib/compact";
 import { applyDiagnosticsToModel } from "@/lib/compact-diagnostics";
 import { compactEditorBridge } from "@/lib/compact-editor-bridge";
 import { analyzePrivacy, type PrivacyKind } from "@/lib/compact-privacy";
+import { explainTypesFromMessages } from "@/lib/compact-symbols";
 import { registerCompactLanguage } from "./compact-language";
 import { EditorTabBar } from "./EditorTabBar";
 
@@ -17,6 +18,8 @@ let typecheckTimeout: ReturnType<typeof setTimeout> | null = null;
 let typecheckGeneration = 0;
 
 const TYPECHECK_DEBOUNCE_MS = 1500;
+/** Log source for silent typecheck explanations — cleared when the file typechecks clean. */
+const TYPECHECK_LOG_SOURCE = "typecheck";
 
 export function CompactEditor() {
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -36,6 +39,7 @@ export function CompactEditor() {
     status,
     compileResult,
     addLog,
+    clearLogsBySource,
     setCompileResult,
     setStatus,
     setLogTab,
@@ -78,13 +82,30 @@ export function CompactEditor() {
 
       if (!result.success && result.errors?.length) {
         refreshMarkers(sourceCode, result.errors);
+        // Replace prior typecheck explanations so Logs stay current.
+        clearLogsBySource(TYPECHECK_LOG_SOURCE);
+        const messages = result.errors.map((e) => e.message);
+        const explanations = explainTypesFromMessages(sourceCode, messages);
+        if (explanations.length > 0) {
+          addLog(
+            makeLog(
+              "info",
+              `Type hints (${result.errors.length} issue${result.errors.length === 1 ? "" : "s"}):`,
+              TYPECHECK_LOG_SOURCE,
+            ),
+          );
+          for (const line of explanations) {
+            addLog(makeLog("info", line, TYPECHECK_LOG_SOURCE));
+          }
+        }
       } else if (result.success) {
         refreshMarkers(sourceCode, []);
+        clearLogsBySource(TYPECHECK_LOG_SOURCE);
       }
 
       setTypecheckStatus("idle");
     },
-    [activeProject?.id, isCompactFile, refreshMarkers],
+    [activeProject?.id, addLog, clearLogsBySource, isCompactFile, refreshMarkers],
   );
 
   const scheduleTypecheck = useCallback(
@@ -232,6 +253,7 @@ export function CompactEditor() {
         upsertGeneratedFiles(result.generatedFiles);
       }
       lastTypecheckErrorsRef.current = { code: compileCode, errors: [] };
+      clearLogsBySource(TYPECHECK_LOG_SOURCE);
     } else {
       const errorCount = result.errors?.length ?? 0;
       addLog(makeLog("error", `Compilation failed: ${errorCount} error${errorCount !== 1 ? "s" : ""}`, "compiler"));
@@ -242,6 +264,14 @@ export function CompactEditor() {
         addLog(makeLog("info", result.installHint, "compiler"));
       }
       lastTypecheckErrorsRef.current = { code: compileCode, errors: result.errors ?? [] };
+      const explanations = explainTypesFromMessages(
+        compileCode,
+        (result.errors ?? []).map((e) => e.message),
+      );
+      clearLogsBySource(TYPECHECK_LOG_SOURCE);
+      for (const line of explanations) {
+        addLog(makeLog("info", line, TYPECHECK_LOG_SOURCE));
+      }
     }
 
     setCompileResult(result);
@@ -249,6 +279,7 @@ export function CompactEditor() {
     refreshMarkers(compileCode, result.errors);
   }, [
     clearLogs,
+    clearLogsBySource,
     setLogTab,
     setBottomPanelOpen,
     setCompileResult,
@@ -302,16 +333,18 @@ export function CompactEditor() {
     <div className="flex flex-col h-full w-full" style={{ background: "#111111" }}>
       <EditorTabBar />
 
-      {isCompactFile && typecheckStatus === "checking" && status === "idle" && (
-        <div
-          className="flex-shrink-0 px-3 py-0.5 text-2xs border-b border-border/50"
-          style={{ color: "#666360", background: "#141414" }}
-        >
-          Typechecking…
-        </div>
-      )}
-
       <div className="flex-1 overflow-hidden relative">
+        {/* Non-layout status: never changes editor height while typing */}
+        {isCompactFile && typecheckStatus === "checking" && status === "idle" && (
+          <div
+            className="pointer-events-none absolute top-2 right-3 z-20 text-2xs font-mono tracking-wide"
+            style={{ color: "#5c5c58" }}
+            aria-live="polite"
+          >
+            Checking…
+          </div>
+        )}
+
         {status === "compiling" || status === "deploying" ? (
           <div className="absolute inset-0 z-10 pointer-events-none">
             <div className="h-0.5 bg-accent/20">
@@ -364,16 +397,23 @@ export function CompactEditor() {
             cursorBlinking: "smooth",
             smoothScrolling: true,
             wordWrap: "on",
-            padding: { top: 20, bottom: 20 },
+            // Extra bottom pad so the caret near the panel still has room; widgets
+            // use fixedOverflowWidgets so suggestions are not clipped by panels.
+            padding: { top: 20, bottom: 72 },
+            fixedOverflowWidgets: true,
             suggest: {
               showKeywords: true,
               showSnippets: true,
+              insertMode: "replace",
+              preview: true,
             },
             quickSuggestions: {
               other: true,
               comments: false,
               strings: false,
             },
+            suggestFontSize: editorFontSize,
+            suggestLineHeight: Math.round(editorFontSize * 1.55),
             bracketPairColorization: { enabled: false },
             guides: {
               bracketPairs: false,

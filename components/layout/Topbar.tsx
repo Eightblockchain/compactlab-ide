@@ -52,6 +52,7 @@ export function Topbar() {
     setDeployResult,
     addLog,
     clearLogs,
+    clearLogsBySource,
     setLogTab,
     setBottomPanelOpen,
     setWalletState,
@@ -257,6 +258,7 @@ export function Topbar() {
       const mode = result.skipZk
         ? "typecheck (--skip-zk, no proving keys)"
         : "full ZK compile";
+      clearLogsBySource("typecheck");
       addLog(
         makeLog(
           "success",

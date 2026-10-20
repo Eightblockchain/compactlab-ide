@@ -13,7 +13,18 @@ export interface CompactParam {
 
 export interface CompactSymbol {
   name: string;
-  kind: "ledger" | "witness" | "circuit" | "enum" | "enum-variant" | "stdlib" | "keyword" | "type";
+  kind:
+    | "ledger"
+    | "witness"
+    | "circuit"
+    | "enum"
+    | "enum-variant"
+    | "stdlib"
+    | "keyword"
+    | "type"
+    | "param"
+    | "local"
+    | "struct";
   type?: string;
   detail?: string;
   documentation?: string;
@@ -159,6 +170,66 @@ export function extractCircuitBodies(code: string): CircuitBody[] {
   return bodies;
 }
 
+/** Innermost circuit/constructor body containing `offset` (0-based into `code`). */
+export function findEnclosingBody(code: string, offset: number): CircuitBody | null {
+  let best: CircuitBody | null = null;
+  for (const body of extractCircuitBodies(code)) {
+    const start = body.bodyStartIndex;
+    const end = start + body.body.length;
+    if (offset < start || offset > end) continue;
+    if (!best || body.body.length < best.body.length) best = body;
+  }
+  return best;
+}
+
+/** `const` / `let` bindings inside a circuit body (best-effort). */
+export function extractLocalBindings(body: string): CompactParam[] {
+  const out: CompactParam[] = [];
+  const seen = new Set<string>();
+  const re = /\b(?:const|let)\s+(\w+)\s*(?::\s*([^=;\n]+))?\s*=/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(body)) !== null) {
+    const name = match[1]!;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    out.push({ name, type: (match[2] ?? "").trim() || "unknown" });
+  }
+  return out;
+}
+
+/**
+ * Symbols that should autocomplete at `offset` — includes circuit/constructor
+ * parameters and locals when the cursor is inside that body.
+ */
+export function scopedCompletions(code: string, offset: number): CompactSymbol[] {
+  const enclosing = findEnclosingBody(code, offset);
+  if (!enclosing) return [];
+
+  const scopeLabel = enclosing.isConstructor
+    ? "constructor"
+    : `circuit ${enclosing.name}`;
+
+  const params: CompactSymbol[] = enclosing.params.map((p) => ({
+    name: p.name,
+    kind: "param" as const,
+    type: p.type,
+    detail: `${p.type} · ${scopeLabel} param`,
+    documentation: enclosing.isConstructor
+      ? `Constructor parameter \`${p.name}: ${p.type}\`. Available while initializing the contract.`
+      : `Circuit parameter \`${p.name}: ${p.type}\` of \`${enclosing.name}\`.`,
+  }));
+
+  const locals: CompactSymbol[] = extractLocalBindings(enclosing.body).map((p) => ({
+    name: p.name,
+    kind: "local" as const,
+    type: p.type,
+    detail: `${p.type} · local`,
+    documentation: `Local binding \`${p.name}\` in ${scopeLabel}.`,
+  }));
+
+  return [...params, ...locals];
+}
+
 export const COMPACT_KEYWORDS = [
   "pragma",
   "import",
@@ -203,7 +274,12 @@ export const COMPACT_TYPES = [
   "Vector",
   "HistoricMerkleTree",
   "MerkleTreePath",
+  "MerkleTree",
   "ZswapCoinPublicKey",
+  "ContractAddress",
+  "Maybe",
+  "Either",
+  "Kernel",
 ] as const;
 
 export const COMPACT_BUILTINS = [
@@ -386,9 +462,37 @@ export function baseAdtName(type: string): string | null {
   return ADT_METHODS[m[1]] ? m[1] : null;
 }
 
-export function hoverDocForWord(code: string, word: string): string | null {
+const TYPE_DOCS: Record<string, string> = {
+  Uint: "Unsigned integer `Uint<N>`. Common sizes: 8, 16, 32, 64, 128.",
+  Boolean: "Boolean `true` / `false`.",
+  Bytes: "Fixed-length byte array `Bytes<N>`.",
+  Field: "Field element used for circuit arithmetic.",
+  Counter: "Ledger ADT: monotonic counter (`increment` / `decrement` / `read`).",
+  Set: "Ledger ADT: set of unique values (`insert`, `member`, …).",
+  Map: "Ledger ADT: key → value map (`insert`, `lookup`, …).",
+  List: "Ledger ADT: doubly-linked list.",
+  Opaque: "Opaque foreign value (`Opaque<\"string\">` or bytes tag) — not a Compact string literal.",
+  Vector: "Fixed-size vector `Vector<N, T>`.",
+  Maybe: "Optional value: `Maybe<T>` with `Some` / `None`.",
+  Either: "Sum type `Either<L, R>` with `Left` / `Right`.",
+  MerkleTree: "On-chain Merkle tree ADT for membership proofs.",
+  HistoricMerkleTree: "Merkle tree that retains historical roots.",
+  ZswapCoinPublicKey: "Public key identifying a shielded coin owner.",
+  ContractAddress: "On-chain address of a deployed Compact contract.",
+  Kernel: "Built-in kernel helpers (block context, etc.).",
+};
+
+const TYPE_TOKEN_RE =
+  /\b(Uint|Boolean|Bytes|Field|Counter|Set|Map|List|Opaque|Vector|Maybe|Either|MerkleTree|HistoricMerkleTree|ZswapCoinPublicKey|ContractAddress|Kernel)\b/g;
+
+export function hoverDocForWord(code: string, word: string, offset?: number): string | null {
   if (KEYWORD_DOCS[word]) return KEYWORD_DOCS[word];
   if (BUILTIN_DOCS[word]) return BUILTIN_DOCS[word];
+
+  if (typeof offset === "number") {
+    const scoped = scopedCompletions(code, offset).find((s) => s.name === word);
+    if (scoped?.documentation) return scoped.documentation;
+  }
 
   const sym = lookupSymbol(code, word);
   if (sym?.documentation) return sym.documentation;
@@ -398,19 +502,43 @@ export function hoverDocForWord(code: string, word: string): string | null {
     if (enumSym?.documentation) return enumSym.documentation;
   }
 
-  const typeDoc: Record<string, string> = {
-    Uint: "Unsigned integer Uint<N>. Common sizes: 8, 16, 32, 64, 128.",
-    Boolean: "Boolean true/false.",
-    Bytes: "Fixed-length byte array Bytes<N>.",
-    Field: "Field element for arithmetic in circuits.",
-    Counter: "Ledger ADT: monotonic counter with increment/decrement.",
-    Set: "Ledger ADT: set of unique values.",
-    Map: "Ledger ADT: key-value map.",
-    List: "Ledger ADT: doubly-linked list.",
-    Opaque: "Opaque foreign value (string or Uint8Array tag).",
-    Vector: "Fixed-size vector type Vector<N, T>.",
+  return TYPE_DOCS[word] ?? null;
+}
+
+/**
+ * Pull Compact type names out of compiler/typecheck messages and return short
+ * plain-language explanations (deduped). Used for Logs while typing.
+ */
+export function explainTypesFromMessages(
+  code: string,
+  messages: string[],
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  const consider = (name: string) => {
+    if (seen.has(name)) return;
+    seen.add(name);
+    const doc = hoverDocForWord(code, name);
+    if (doc) out.push(`${name} — ${doc}`);
   };
-  return typeDoc[word] ?? null;
+
+  for (const message of messages) {
+    for (const m of message.matchAll(TYPE_TOKEN_RE)) {
+      consider(m[1]!);
+    }
+    // User-defined enums / ledger names mentioned in errors
+    for (const sym of extractAllSymbols(code)) {
+      if (
+        (sym.kind === "enum" || sym.kind === "ledger" || sym.kind === "witness") &&
+        message.includes(sym.name)
+      ) {
+        consider(sym.name);
+      }
+    }
+  }
+
+  return out;
 }
 
 export function stdlibCompletions(): CompactSymbol[] {
