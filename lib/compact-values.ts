@@ -87,6 +87,88 @@ function fromHex(hex: string): Uint8Array {
   return out;
 }
 
+/** True when bytes decode as UTF-8 with only printable (non-control) characters. */
+export function bytesArePrintableText(bytes: Uint8Array): boolean {
+  if (bytes.length === 0) return false;
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    for (const ch of text) {
+      const cp = ch.codePointAt(0)!;
+      if (cp < 0x20 || cp === 0x7f) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Prefer readable UTF-8 when the bytes are printable text (e.g. country "UG");
+ * otherwise lowercase hex without 0x.
+ */
+export function formatBytesForDisplay(bytes: Uint8Array): string {
+  if (bytesArePrintableText(bytes)) {
+    return new TextDecoder("utf-8").decode(bytes);
+  }
+  return toHex(bytes);
+}
+
+/**
+ * Accept hex (`ab12`, `0xab12`) or UTF-8 text whose byte length equals `len`
+ * (e.g. `UG` for Bytes<2>). Exact-length hex wins when both could apply.
+ */
+export function parseBytesInput(raw: string, len: number, label: string): Uint8Array {
+  let value = raw.trim();
+  if (
+    (value.startsWith('"') && value.endsWith('"') && value.length >= 2) ||
+    (value.startsWith("'") && value.endsWith("'") && value.length >= 2)
+  ) {
+    value = value.slice(1, -1);
+  }
+  if (!value) {
+    throw new Error(`Missing value for ${label}`);
+  }
+
+  const hexBody =
+    value.startsWith("0x") || value.startsWith("0X") ? value.slice(2) : value;
+  const looksLikeHex = /^[0-9a-fA-F]+$/.test(hexBody);
+
+  if (looksLikeHex && hexBody.length === len * 2) {
+    return fromHex(hexBody);
+  }
+
+  const utf8 = new TextEncoder().encode(value);
+  if (utf8.length === len) {
+    return utf8;
+  }
+
+  if (looksLikeHex) {
+    throw new Error(
+      `${label} needs ${len * 2} hex chars (got ${hexBody.length}), or UTF-8 text that is exactly ${len} byte(s) (e.g. a ${len}-character ASCII string)`,
+    );
+  }
+
+  throw new Error(
+    `${label} needs UTF-8 text of exactly ${len} byte(s) (got ${utf8.length}), or ${len * 2} hex chars`,
+  );
+}
+
+function parseHexOnlyBytes(raw: string, len: number, label: string): Uint8Array {
+  let value = raw.trim();
+  if (
+    (value.startsWith('"') && value.endsWith('"') && value.length >= 2) ||
+    (value.startsWith("'") && value.endsWith("'") && value.length >= 2)
+  ) {
+    value = value.slice(1, -1);
+  }
+  const hexBody =
+    value.startsWith("0x") || value.startsWith("0X") ? value.slice(2) : value;
+  if (!/^[0-9a-fA-F]+$/.test(hexBody) || hexBody.length !== len * 2) {
+    throw new Error(`${label} needs ${len * 2} hex chars (got ${hexBody.length || 0})`);
+  }
+  return fromHex(hexBody);
+}
+
 export function normalizeCompactType(type: string): string {
   return type.trim().replace(/\s+/g, " ");
 }
@@ -410,7 +492,10 @@ export function placeholderForCompactType(
     case "string":
       return "hello";
     case "bytes":
-      return `${len * 2} hex chars`;
+      if (len <= 8) {
+        return `text (${len} byte${len === 1 ? "" : "s"}, e.g. country code) or ${len * 2} hex`;
+      }
+      return `${len * 2} hex chars, or ${len}-byte UTF-8 text`;
     case "coinPublicKey":
     case "contractAddress":
       return "64 hex chars (32 bytes)";
@@ -421,15 +506,6 @@ export function placeholderForCompactType(
 
 export function generateBytesHex(byteLength = 32): string {
   return toHex(crypto.getRandomValues(new Uint8Array(byteLength)));
-}
-
-function parseHexBytes(raw: string, len: number, label: string): Uint8Array {
-  const hex = raw.startsWith("0x") || raw.startsWith("0X") ? raw.slice(2) : raw;
-  if (!/^[0-9a-fA-F]*$/.test(hex)) throw new Error(`Expected hex for ${label}`);
-  if (hex.length !== len * 2) {
-    throw new Error(`${label} needs ${len * 2} hex chars (got ${hex.length})`);
-  }
-  return fromHex(hex);
 }
 
 function parseScalarString(type: string, raw: string, schema?: CompactTypeSchema | null): unknown {
@@ -445,7 +521,7 @@ function parseScalarString(type: string, raw: string, schema?: CompactTypeSchema
   }
   if (kind === "bytes") {
     const len = schema?.length ?? bytesLengthFromType(type) ?? 32;
-    return parseHexBytes(value, len, normalizeCompactType(type));
+    return parseBytesInput(value, len, normalizeCompactType(type));
   }
   if (kind === "integer") {
     if (!/^-?\d+$/.test(value)) {
@@ -454,7 +530,8 @@ function parseScalarString(type: string, raw: string, schema?: CompactTypeSchema
     return BigInt(value);
   }
   if (kind === "coinPublicKey" || kind === "contractAddress") {
-    return { bytes: parseHexBytes(value, 32, normalizeCompactType(type)) };
+    // Keys/addresses stay hex-only — not free-form text.
+    return { bytes: parseHexOnlyBytes(value, 32, normalizeCompactType(type)) };
   }
   if (kind === "string") return value;
   throw new Error(`Type ${normalizeCompactType(type)} requires a JSON value`);
@@ -500,19 +577,21 @@ export function encodeCompactJsonValue(
 
   if (kind === "bytes") {
     const len = schema?.length ?? bytesLengthFromType(type) ?? 32;
-    if (typeof json === "string") return parseHexBytes(json, len, at);
+    if (typeof json === "string") return parseBytesInput(json, len, at);
     if (Array.isArray(json) && json.every((n) => typeof n === "number")) {
       if (json.length !== len) throw new Error(`${at}: expected ${len} bytes`);
       return Uint8Array.from(json);
     }
-    throw new Error(`${at}: expected hex string for Bytes<${len}>`);
+    throw new Error(
+      `${at}: expected UTF-8 text (${len} bytes) or ${len * 2}-char hex for Bytes<${len}>`,
+    );
   }
 
   if (kind === "coinPublicKey" || kind === "contractAddress") {
-    if (typeof json === "string") return { bytes: parseHexBytes(json, 32, at) };
+    if (typeof json === "string") return { bytes: parseHexOnlyBytes(json, 32, at) };
     if (json && typeof json === "object" && "bytes" in (json as object)) {
       const b = (json as { bytes: unknown }).bytes;
-      if (typeof b === "string") return { bytes: parseHexBytes(b, 32, `${at}.bytes`) };
+      if (typeof b === "string") return { bytes: parseHexOnlyBytes(b, 32, `${at}.bytes`) };
       if (Array.isArray(b)) return { bytes: Uint8Array.from(b as number[]) };
     }
     throw new Error(`${at}: expected 64-char hex or { bytes: hex }`);
