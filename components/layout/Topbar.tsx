@@ -62,6 +62,7 @@ export function Topbar() {
     witnessValues,
     constructorValues,
     setConstructorValues,
+    setWitnessValues,
     compileResult,
     activeFileId,
     tabBuffers,
@@ -86,7 +87,15 @@ export function Topbar() {
   const [ctorPrompt, setCtorPrompt] = useState<{
     params: Array<{ name: string; type: string }>;
     values: Record<string, string>;
-    resolve: (values: Record<string, string> | null) => void;
+    witnesses: Array<{ name: string; type: string }>;
+    witnessValues: Record<string, string>;
+    constructorWitnessNames: string[];
+    resolve: (
+      result: {
+        constructorValues: Record<string, string>;
+        witnessValues: Record<string, string>;
+      } | null,
+    ) => void;
   } | null>(null);
 
   const askSponsorFallback = useCallback(
@@ -384,24 +393,92 @@ export function Topbar() {
       ctorMeta.inputs.length > 0 ? ctorMeta.inputs : ctorParamsResolved;
     const typeEnv = typeEnvFromCompactSource(compactSource);
 
+    const { witnessSpecsForNames, validateWitnessValues } = await import(
+      "@/lib/playground-witnesses"
+    );
+    // Only witnesses the constructor body calls are required at Deploy.
+    // Other declared witnesses run later when their circuits are Called.
+    const deployWitnessSpecs = witnessSpecsForNames(
+      witnessSpecs,
+      ctorMeta.witnessNamesUsed,
+    );
+
     let ctorValues = { ...useIDEStore.getState().constructorValues };
-    if (ctorParams.length > 0) {
-      const filled = await new Promise<Record<string, string> | null>((resolve) => {
-        setCtorPrompt({ params: ctorParams, values: ctorValues, resolve });
+    let deployWitnessValues = { ...useIDEStore.getState().witnessValues };
+
+    const needsSetup = ctorParams.length > 0 || deployWitnessSpecs.length > 0;
+
+    if (needsSetup) {
+      const filled = await new Promise<{
+        constructorValues: Record<string, string>;
+        witnessValues: Record<string, string>;
+      } | null>((resolve) => {
+        setCtorPrompt({
+          params: ctorParams,
+          values: ctorValues,
+          witnesses: deployWitnessSpecs,
+          witnessValues: deployWitnessValues,
+          constructorWitnessNames: ctorMeta.witnessNamesUsed,
+          resolve,
+        });
       });
       if (!filled) {
-        addLog(makeLog("info", "Deploy cancelled: constructor arguments not provided.", "network"));
+        addLog(
+          makeLog(
+            "info",
+            "Deploy cancelled: required Deploy inputs were not provided.",
+            "network",
+          ),
+        );
         return;
       }
-      ctorValues = filled;
-      setConstructorValues(filled);
-      addLog(
-        makeLog(
-          "info",
-          `Constructor args: ${ctorParams.map((p) => `${p.name}=${filled[p.name] ?? ""}`).join(", ")}`,
-          "network",
-        ),
-      );
+      ctorValues = filled.constructorValues;
+      deployWitnessValues = filled.witnessValues;
+      setConstructorValues(filled.constructorValues);
+      if (deployWitnessSpecs.length > 0) {
+        setWitnessValues({
+          ...useIDEStore.getState().witnessValues,
+          ...filled.witnessValues,
+        });
+      }
+      if (ctorParams.length > 0) {
+        addLog(
+          makeLog(
+            "info",
+            `Constructor args: ${ctorParams.map((p) => `${p.name}=${filled.constructorValues[p.name] ?? ""}`).join(", ")}`,
+            "network",
+          ),
+        );
+      }
+      if (deployWitnessSpecs.length > 0) {
+        addLog(
+          makeLog(
+            "info",
+            `Private witnesses ready for Deploy: ${deployWitnessSpecs.map((w) => w.name).join(", ")}`,
+            "network",
+          ),
+        );
+      }
+    }
+
+    // Final gate — should already pass after the setup modal.
+    const ctorErr = validateCompactParams(
+      ctorParams,
+      ctorValues,
+      "Constructor parameter",
+      typeEnv,
+    );
+    if (ctorErr) {
+      addLog(makeLog("error", ctorErr, "network"));
+      return;
+    }
+    if (deployWitnessSpecs.length > 0) {
+      const wErr = validateWitnessValues(deployWitnessSpecs, deployWitnessValues);
+      if (wErr) {
+        addLog(makeLog("error", wErr, "network"));
+        setRightPanelTab("contract-ui");
+        return;
+      }
     }
 
     const started = Date.now();
@@ -547,23 +624,20 @@ export function Topbar() {
       return;
     }
 
-    const ctorErr = validateCompactParams(
+    const ctorErrLate = validateCompactParams(
       ctorParams,
       ctorValues,
       "Constructor parameter",
       typeEnv,
     );
-    if (ctorErr) {
-      failDeploy(ctorErr);
+    if (ctorErrLate) {
+      failDeploy(ctorErrLate);
       return;
     }
-    if (ctorMeta.usesWitnesses) {
-      const { validateWitnessValues } = await import("@/lib/playground-witnesses");
-      const wErr = validateWitnessValues(witnessSpecs, witnessValues);
+    if (deployWitnessSpecs.length > 0) {
+      const wErr = validateWitnessValues(deployWitnessSpecs, deployWitnessValues);
       if (wErr) {
-        failDeploy(
-          `${wErr.replace("before Call", "before Deploy")} Constructor calls witness(es); set Private witnesses in the Contract panel.`,
-        );
+        failDeploy(wErr);
         setRightPanelTab("contract-ui");
         return;
       }
@@ -579,10 +653,11 @@ export function Topbar() {
           artifactBaseUrl,
           projectId: activeProject?.id,
           witnessSpecs,
-          witnessValues,
+          witnessValues: deployWitnessValues,
           constructorParams: ctorParams,
           constructorValues: ctorValues,
           requireWitnessValuesAtDeploy: ctorMeta.usesWitnesses,
+          requiredWitnessNamesAtDeploy: ctorMeta.witnessNamesUsed,
           typeEnv,
           feeMode: deployFeeMode,
           onStage: (s) => setDeployStage(s),
@@ -939,8 +1014,11 @@ export function Topbar() {
     />
     <DeployConstructorModal
       open={Boolean(ctorPrompt)}
-      params={ctorPrompt?.params ?? []}
-      initialValues={ctorPrompt?.values ?? {}}
+      constructorParams={ctorPrompt?.params ?? []}
+      initialConstructorValues={ctorPrompt?.values ?? {}}
+      witnessParams={ctorPrompt?.witnesses ?? []}
+      initialWitnessValues={ctorPrompt?.witnessValues ?? {}}
+      constructorWitnessNames={ctorPrompt?.constructorWitnessNames ?? []}
       typeEnv={
         ctorPrompt
           ? typeEnvFromCompactSource(
@@ -958,10 +1036,10 @@ export function Topbar() {
         setCtorPrompt(null);
         resolve?.(null);
       }}
-      onConfirm={(values) => {
+      onConfirm={(result) => {
         const resolve = ctorPrompt?.resolve;
         setCtorPrompt(null);
-        resolve?.(values);
+        resolve?.(result);
       }}
     />
     <DeployProgressModal

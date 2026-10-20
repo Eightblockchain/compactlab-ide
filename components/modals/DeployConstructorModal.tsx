@@ -12,34 +12,55 @@ import {
   type CompactParamSpec,
   type CompactTypeEnv,
 } from "@/lib/compact-values";
+import { WitnessInputRow } from "@/components/panels/compact-value-inputs";
+import { validateWitnessValues, type WitnessSpec } from "@/lib/playground-witnesses";
+
+export type DeploySetupResult = {
+  constructorValues: Record<string, string>;
+  witnessValues: Record<string, string>;
+};
 
 type Props = {
   open: boolean;
-  params: CompactParamSpec[];
-  initialValues: Record<string, string>;
+  /** Compact constructor args (may be empty). */
+  constructorParams: CompactParamSpec[];
+  initialConstructorValues: Record<string, string>;
+  /**
+   * Private witnesses required before Deploy (constructor reads them).
+   * Empty when constructor does not call witnesses.
+   */
+  witnessParams: WitnessSpec[];
+  initialWitnessValues: Record<string, string>;
+  /** Names the constructor actually references (for emphasis). */
+  constructorWitnessNames?: string[];
   typeEnv?: CompactTypeEnv;
   onCancel: () => void;
-  onConfirm: (values: Record<string, string>) => void;
+  onConfirm: (result: DeploySetupResult) => void;
 };
 
 /**
- * Collect Compact constructor arguments before Deploy submits a transaction.
- * Matches generated `initialState(context, …args)` extra parameters.
+ * Collect everything Deploy needs before opening the progress modal:
+ * constructor arguments and/or private witnesses the constructor will call.
  */
 export function DeployConstructorModal({
   open,
-  params,
-  initialValues,
+  constructorParams,
+  initialConstructorValues,
+  witnessParams,
+  initialWitnessValues,
+  constructorWitnessNames = [],
   typeEnv,
   onCancel,
   onConfirm,
 }: Props) {
-  const [values, setValues] = useState<Record<string, string>>(initialValues);
+  const [ctorValues, setCtorValues] = useState(initialConstructorValues);
+  const [wValues, setWValues] = useState(initialWitnessValues);
 
   useEffect(() => {
     if (!open) return;
-    setValues(initialValues);
-  }, [open, initialValues]);
+    setCtorValues(initialConstructorValues);
+    setWValues(initialWitnessValues);
+  }, [open, initialConstructorValues, initialWitnessValues]);
 
   useEffect(() => {
     if (!open) return;
@@ -50,12 +71,36 @@ export function DeployConstructorModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onCancel]);
 
-  const err = useMemo(
-    () => validateCompactParams(params, values, "Constructor parameter", typeEnv),
-    [params, values, typeEnv],
+  const ctorErr = useMemo(
+    () =>
+      constructorParams.length > 0
+        ? validateCompactParams(constructorParams, ctorValues, "Constructor parameter", typeEnv)
+        : null,
+    [constructorParams, ctorValues, typeEnv],
+  );
+
+  const witnessErr = useMemo(
+    () =>
+      witnessParams.length > 0 ? validateWitnessValues(witnessParams, wValues) : null,
+    [witnessParams, wValues],
+  );
+
+  const err = ctorErr ?? witnessErr;
+  const usedSet = useMemo(
+    () => new Set(constructorWitnessNames),
+    [constructorWitnessNames],
   );
 
   if (!open) return null;
+
+  const hasCtor = constructorParams.length > 0;
+  const hasWitnesses = witnessParams.length > 0;
+  const title =
+    hasCtor && hasWitnesses
+      ? "Before you Deploy"
+      : hasWitnesses
+        ? "Set private witnesses"
+        : "Set constructor values";
 
   return (
     <div
@@ -67,75 +112,126 @@ export function DeployConstructorModal({
       <div
         role="dialog"
         aria-modal="true"
-        aria-labelledby="deploy-ctor-title"
-        className="relative w-full max-w-[520px] rounded-2xl p-5 space-y-4 max-h-[85vh] overflow-y-auto"
+        aria-labelledby="deploy-setup-title"
+        className="relative w-full max-w-[540px] rounded-2xl p-5 space-y-4 max-h-[85vh] overflow-y-auto"
         style={{
-          background: "#131313",
+          background: "linear-gradient(180deg, #161616 0%, #111111 100%)",
           border: "1px solid rgba(255,255,255,0.1)",
-          boxShadow: "0 32px 80px rgba(0,0,0,0.7)",
+          boxShadow: "0 32px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(240,99,88,0.08)",
         }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="space-y-2">
-          <h2 id="deploy-ctor-title" className="text-lg font-semibold text-text-primary tracking-tight">
-            Set constructor values
+          <p className="text-2xs uppercase tracking-[0.14em] text-accent/80 font-medium">
+            Deploy setup
+          </p>
+          <h2 id="deploy-setup-title" className="text-lg font-semibold text-text-primary tracking-tight">
+            {title}
           </h2>
           <p className="text-sm text-text-secondary leading-relaxed">
-            These run once when the contract is created on Preprod. Use the same types Compact
-            declares in the constructor. You cannot change them after Deploy.
+            {hasWitnesses && hasCtor
+              ? "Fill constructor arguments and the private witnesses this constructor calls. Other witnesses are not needed until Call."
+              : hasWitnesses
+                ? "This constructor calls the witnesses below. Other declared witnesses are not required at Deploy."
+                : "These run once when the contract is created on Preprod. You cannot change them after Deploy."}
           </p>
         </div>
 
-        <div className="space-y-3">
-          {params.map((p) => {
-            const kind = compactValueKind(p.type, p.typeSchema, typeEnv);
-            const composite = isCompositeCompactKind(kind);
-            return (
-              <div key={p.name} className="space-y-1">
-                <label className="text-xs font-mono text-text-primary">
-                  {p.name}
-                  <span className="ml-1.5 text-2xs text-accent/80">{p.type}</span>
-                </label>
-                {kind === "boolean" ? (
-                  <select
-                    value={
-                      values[p.name] === "false"
-                        ? "false"
-                        : values[p.name] === "true"
-                          ? "true"
-                          : ""
-                    }
-                    onChange={(e) => setValues((v) => ({ ...v, [p.name]: e.target.value }))}
-                    className="w-full bg-surface border border-border rounded px-2 py-1.5 text-xs font-mono text-text-primary"
-                  >
-                    <option value="">Select…</option>
-                    <option value="true">true</option>
-                    <option value="false">false</option>
-                  </select>
-                ) : composite ? (
-                  <textarea
-                    value={values[p.name] ?? ""}
-                    onChange={(e) => setValues((v) => ({ ...v, [p.name]: e.target.value }))}
-                    rows={5}
-                    spellCheck={false}
-                    placeholder={exampleJsonForType(p.type, p.typeSchema, typeEnv)}
-                    className="w-full bg-surface border border-border rounded px-2 py-1.5 text-xs font-mono text-text-primary placeholder:text-text-dim"
+        {hasCtor && (
+          <section className="space-y-3">
+            <h3 className="text-2xs font-semibold uppercase tracking-[0.12em] text-text-muted">
+              Constructor arguments
+            </h3>
+            <div className="space-y-3 rounded-xl border border-white/[0.08] bg-white/[0.025] p-3.5">
+              {constructorParams.map((p, idx) => {
+                const kind = compactValueKind(p.type, p.typeSchema, typeEnv);
+                const composite = isCompositeCompactKind(kind);
+                return (
+                  <div key={p.name} className="space-y-1">
+                    <label className="text-xs font-mono text-text-primary">
+                      {p.name}
+                      <span className="ml-1.5 text-2xs text-accent/80">{p.type}</span>
+                    </label>
+                    {kind === "boolean" ? (
+                      <select
+                        value={
+                          ctorValues[p.name] === "false"
+                            ? "false"
+                            : ctorValues[p.name] === "true"
+                              ? "true"
+                              : ""
+                        }
+                        onChange={(e) =>
+                          setCtorValues((v) => ({ ...v, [p.name]: e.target.value }))
+                        }
+                        className="w-full bg-surface border border-border rounded-lg px-2 py-1.5 text-xs font-mono text-text-primary"
+                      >
+                        <option value="">Select…</option>
+                        <option value="true">true</option>
+                        <option value="false">false</option>
+                      </select>
+                    ) : composite ? (
+                      <textarea
+                        value={ctorValues[p.name] ?? ""}
+                        onChange={(e) =>
+                          setCtorValues((v) => ({ ...v, [p.name]: e.target.value }))
+                        }
+                        rows={5}
+                        spellCheck={false}
+                        placeholder={exampleJsonForType(p.type, p.typeSchema, typeEnv)}
+                        className="w-full bg-surface border border-border rounded-lg px-2 py-1.5 text-xs font-mono text-text-primary placeholder:text-text-dim"
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        value={ctorValues[p.name] ?? ""}
+                        onChange={(e) =>
+                          setCtorValues((v) => ({ ...v, [p.name]: e.target.value }))
+                        }
+                        spellCheck={false}
+                        placeholder={placeholderForCompactType(p.type, p.typeSchema, typeEnv)}
+                        className="w-full bg-surface border border-border rounded-lg px-2 py-1.5 text-xs font-mono text-text-primary placeholder:text-text-dim"
+                        autoFocus={idx === 0 && !hasWitnesses}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        {hasWitnesses && (
+          <section className="space-y-3">
+            <div className="space-y-1">
+              <h3 className="text-2xs font-semibold uppercase tracking-[0.12em] text-text-muted">
+                Private witnesses
+              </h3>
+              <p className="text-2xs text-text-muted leading-relaxed">
+                Only witnesses the <span className="text-text-secondary">constructor</span> calls
+                are required here. Other witnesses can wait until you Call a circuit that uses them.
+                Keep these secrets — you will need the same values later.
+              </p>
+            </div>
+            <div className="space-y-2.5 rounded-xl border border-white/[0.08] bg-white/[0.025] p-3.5">
+              {witnessParams.map((w) => (
+                <div key={w.name} className="space-y-1">
+                  {usedSet.has(w.name) && (
+                    <p className="text-[10px] uppercase tracking-wide text-accent/70">
+                      Used at Deploy
+                    </p>
+                  )}
+                  <WitnessInputRow
+                    name={w.name}
+                    type={w.type}
+                    value={wValues[w.name] ?? ""}
+                    onChange={(val) => setWValues((v) => ({ ...v, [w.name]: val }))}
                   />
-                ) : (
-                  <input
-                    type="text"
-                    value={values[p.name] ?? ""}
-                    onChange={(e) => setValues((v) => ({ ...v, [p.name]: e.target.value }))}
-                    spellCheck={false}
-                    placeholder={placeholderForCompactType(p.type, p.typeSchema, typeEnv)}
-                    className="w-full bg-surface border border-border rounded px-2 py-1.5 text-xs font-mono text-text-primary placeholder:text-text-dim"
-                    autoFocus={p.name === params[0]?.name}
-                  />
-                )}
-              </div>
-            );
-          })}
-        </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         {err && <p className="text-xs text-warning leading-relaxed">{err}</p>}
 
@@ -147,7 +243,12 @@ export function DeployConstructorModal({
             variant="accent"
             size="md"
             disabled={!!err}
-            onClick={() => onConfirm(values)}
+            onClick={() =>
+              onConfirm({
+                constructorValues: ctorValues,
+                witnessValues: wValues,
+              })
+            }
           >
             Continue to Deploy
           </Button>

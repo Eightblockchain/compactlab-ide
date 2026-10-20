@@ -51,6 +51,8 @@ export async function deployPlaygroundContract(
     }>;
     constructorValues?: Record<string, string>;
     requireWitnessValuesAtDeploy?: boolean;
+    /** Witness names the constructor calls — only these need values at Deploy. */
+    requiredWitnessNamesAtDeploy?: string[];
     typeEnv?: import("@/lib/compact-values").CompactTypeEnv;
     feeMode?: "sponsored" | "self";
     onStage?: (stage: DeployStage) => void;
@@ -81,6 +83,7 @@ export async function deployPlaygroundContract(
   const constructorParams = options?.constructorParams ?? [];
   const constructorValues = options?.constructorValues ?? {};
   const requireWitnessValuesAtDeploy = options?.requireWitnessValuesAtDeploy === true;
+  const requiredWitnessNamesAtDeploy = options?.requiredWitnessNamesAtDeploy ?? [];
   const typeEnv = options?.typeEnv;
 
   if (constructorParams.length > 0) {
@@ -106,13 +109,21 @@ export async function deployPlaygroundContract(
 
   if (witnessSpecs.length > 0) {
     if (requireWitnessValuesAtDeploy) {
-      const { validateWitnessValues } = await import("@/lib/playground-witnesses");
-      const witnessErr = validateWitnessValues(witnessSpecs, witnessValues);
+      const { validateWitnessValues, witnessSpecsForNames } = await import(
+        "@/lib/playground-witnesses"
+      );
+      const requiredSpecs = witnessSpecsForNames(
+        witnessSpecs,
+        requiredWitnessNamesAtDeploy.length > 0
+          ? requiredWitnessNamesAtDeploy
+          : witnessSpecs.map((s) => s.name),
+      );
+      const witnessErr = validateWitnessValues(requiredSpecs, witnessValues);
       if (witnessErr) {
         log("error", witnessErr.replace("before Call", "before Deploy"));
         log(
           "warn",
-          "This constructor calls witness(es). Set Private witnesses in Contract UI before Deploy.",
+          "This constructor calls the listed witness(es). Provide them in Deploy setup (other witnesses wait until Call).",
         );
         return {
           success: false,
@@ -122,12 +133,12 @@ export async function deployPlaygroundContract(
       }
       log(
         "info",
-        `Constructor uses witness(es): ${witnessSpecs.map((s) => s.name).join(", ")}. Using your Contract UI values.`,
+        `Constructor uses witness(es): ${requiredSpecs.map((s) => s.name).join(", ")}. Other declared witnesses are not required at Deploy.`,
       );
     } else {
       log(
         "info",
-        `Contract declares ${witnessSpecs.length} witness(es): ${witnessSpecs.map((s) => s.name).join(", ")}. Values are needed at Call (placeholders used at Deploy).`,
+        `Contract declares ${witnessSpecs.length} witness(es): ${witnessSpecs.map((s) => s.name).join(", ")}. Values are needed when circuits that call them run (placeholders used at Deploy).`,
       );
     }
   }
@@ -197,6 +208,7 @@ export async function deployPlaygroundContract(
     constructorParams,
     constructorValues,
     requireWitnessValuesAtDeploy,
+    requiredWitnessNamesAtDeploy,
     typeEnv,
   });
 

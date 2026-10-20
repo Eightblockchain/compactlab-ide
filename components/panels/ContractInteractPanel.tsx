@@ -4,12 +4,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useIDEStore } from "@/store/ide";
 import { Badge, Button, StatusDot } from "@/components/ui";
 import { extractCircuits, extractLedgerVars, extractWitnesses } from "@/lib/compact";
+import { circuitWitnessUsage } from "@/lib/compact-constructor";
 import { cn, generateId } from "@/lib/utils";
 import { useLaceWallet } from "@/hooks/useLaceWallet";
 import { getDeployGate, getLiveCompactSource } from "@/lib/deploy-gate";
 import { isOutdatedManagedArtifactUrl, OUTDATED_ARTIFACT_MESSAGE } from "@/lib/playground-assets";
 import { oneAmContractUrl, oneAmTxUrl } from "@/lib/explorers";
-import { validateWitnessValues } from "@/lib/playground-witnesses";
+import {
+  validateWitnessValues,
+  witnessSpecsForNames,
+} from "@/lib/playground-witnesses";
 import {
   typeEnvFromCompactSource,
   validateCompactParams,
@@ -77,7 +81,6 @@ export function ContractInteractPanel() {
   );
   const witnesses = useMemo(() => extractWitnesses(liveCompact), [liveCompact]);
   const typeEnv = useMemo(() => typeEnvFromCompactSource(liveCompact), [liveCompact]);
-  const witnessErr = validateWitnessValues(witnesses, witnessValues);
   const ledgerVars = useMemo(() => extractLedgerVars(liveCompact), [liveCompact]);
 
   const circuits = useMemo(() => {
@@ -90,7 +93,7 @@ export function ContractInteractPanel() {
   const [addressInput, setAddressInput] = useState(deployResult?.contractAddress ?? "");
   const [activeAddress, setActiveAddress] = useState(deployResult?.contractAddress ?? "");
   const [joinOpen, setJoinOpen] = useState(false);
-  const [witnessOpen, setWitnessOpen] = useState(witnesses.some((w) => !witnessValues[w.name]));
+  const [witnessOpen, setWitnessOpen] = useState(false);
   const [selectedCircuit, setSelectedCircuit] = useState<string | null>(null);
 
   useEffect(() => {
@@ -106,6 +109,32 @@ export function ContractInteractPanel() {
       setSelectedCircuit(circuits[0].name);
     }
   }, [circuits, selectedCircuit]);
+
+  const selected = circuits.find((c) => c.name === selectedCircuit) ?? circuits[0];
+
+  const requiredWitnessNames = useMemo(() => {
+    if (!selected) return [] as string[];
+    return circuitWitnessUsage(
+      liveCompact,
+      selected.name,
+      witnesses.map((w) => w.name),
+    ).witnessNamesUsed;
+  }, [liveCompact, selected, witnesses]);
+
+  const requiredWitnessSpecs = useMemo(
+    () => witnessSpecsForNames(witnesses, requiredWitnessNames),
+    [witnesses, requiredWitnessNames],
+  );
+
+  const witnessErr = validateWitnessValues(requiredWitnessSpecs, witnessValues);
+  const requiredWitnessNameSet = useMemo(
+    () => new Set(requiredWitnessNames),
+    [requiredWitnessNames],
+  );
+
+  useEffect(() => {
+    if (witnessErr) setWitnessOpen(true);
+  }, [witnessErr, selected?.name]);
 
   const [decodedState, setDecodedState] = useState<Record<string, string> | null>(null);
   const [lastTx, setLastTx] = useState<{ hash: string; blockHeight: number | null } | null>(null);
@@ -190,8 +219,6 @@ export function ContractInteractPanel() {
         : witnessErr
           ? witnessErr
           : null;
-
-  const selected = circuits.find((c) => c.name === selectedCircuit) ?? circuits[0];
 
   const handleLoadAddress = (addrOverride?: string) => {
     const addr = (addrOverride ?? addressInput).trim();
@@ -278,6 +305,7 @@ export function ContractInteractPanel() {
           projectId: activeProject?.id,
           witnessSpecs: witnesses,
           witnessValues,
+          requiredWitnessNames,
           circuitParams: selected.inputs,
           typeEnv,
           feeMode,
@@ -318,6 +346,7 @@ export function ContractInteractPanel() {
     activeProject,
     activeAddress,
     witnesses,
+    requiredWitnessNames,
     witnessValues,
     typeEnv,
     addLog,
@@ -338,7 +367,7 @@ export function ContractInteractPanel() {
         {witnesses.length > 0 && (
           <PanelSection title="Private witnesses">
             <p className="text-2xs text-text-muted leading-relaxed mb-2">
-              Fill these before you call circuits that use them. Keep the same values across related calls.
+              Only circuits that call a witness need its value. You can fill them when you Call those circuits.
             </p>
             <div className="space-y-2">
               {witnesses.map((w) => (
@@ -491,24 +520,38 @@ export function ContractInteractPanel() {
               className="text-2xs text-text-muted hover:text-text-primary"
               onClick={() => setWitnessOpen((v) => !v)}
             >
-              {witnessOpen ? "Hide" : witnessErr ? "Needed" : "Show"}
+              {witnessOpen
+                ? "Hide"
+                : witnessErr
+                  ? "Needed"
+                  : requiredWitnessNames.length > 0
+                    ? `${requiredWitnessNames.length} for Call`
+                    : "Show"}
             </button>
           }
         >
           {witnessOpen && (
             <div className="space-y-2">
               <p className="text-2xs text-text-muted leading-relaxed">
-                Off-chain secrets used inside proofs. Use the same values as when you posted.
+                {selected
+                  ? requiredWitnessNames.length > 0
+                    ? `${selected.name} needs: ${requiredWitnessNames.join(", ")}. Other witnesses wait until a circuit that calls them runs.`
+                    : `${selected.name} does not call private witnesses — values not required for this Call.`
+                  : "Off-chain secrets used inside proofs."}
               </p>
-              {witnesses.map((w) => (
-                <WitnessInputRow
-                  key={w.name}
-                  name={w.name}
-                  type={w.type}
-                  value={witnessValues[w.name] ?? ""}
-                  onChange={(val) => setWitnessValue(w.name, val)}
-                />
-              ))}
+              {witnesses.map((w) => {
+                const needed = requiredWitnessNameSet.has(w.name);
+                return (
+                  <div key={w.name} className={cn(!needed && "opacity-55")}>
+                    <WitnessInputRow
+                      name={needed ? w.name : `${w.name} (not used by ${selected?.name ?? "Call"})`}
+                      type={w.type}
+                      value={witnessValues[w.name] ?? ""}
+                      onChange={(val) => setWitnessValue(w.name, val)}
+                    />
+                  </div>
+                );
+              })}
               {witnessErr && <p className="text-2xs text-warning">{witnessErr}</p>}
             </div>
           )}

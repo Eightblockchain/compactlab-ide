@@ -46,6 +46,7 @@ import {
   mergeWitnessSpecs,
   serializePrivateState,
   tryBuildPrivateStateFromValues,
+  witnessSpecsForNames,
   type PlaygroundPrivateState,
   type WitnessSpec,
 } from "@/lib/playground-witnesses";
@@ -235,10 +236,19 @@ export type PlaygroundWitnessOptions = {
   /** User string values for constructor args. */
   constructorValues?: Record<string, string>;
   /**
-   * When true, deploy requires real witness values (constructor calls witnesses).
-   * When false/undefined, placeholders are allowed at deploy.
+   * When true, deploy requires real witness values for names in
+   * `requiredWitnessNamesAtDeploy` (constructor-called witnesses only).
+   * Other declared witnesses still get placeholders — they run on later circuits.
    */
   requireWitnessValuesAtDeploy?: boolean;
+  /** Witness names the constructor body actually calls (subset of declared witnesses). */
+  requiredWitnessNamesAtDeploy?: string[];
+  /**
+   * Witness names the circuit being Called actually uses.
+   * When set, join/Call only requires those values; others get placeholders.
+   * When omitted, all declared witnesses are required (legacy).
+   */
+  requiredWitnessNamesAtCall?: string[];
   /** Enum/struct decls from Compact source for JSON composite encoding. */
   typeEnv?: import("@/lib/compact-values").CompactTypeEnv;
 };
@@ -380,11 +390,23 @@ export class PlaygroundContractAPI {
 
     if (privateStateId && witnessSpecs.length > 0) {
       if (this.witnessOpts.requireWitnessValuesAtDeploy) {
-        initialPrivateState = requireUserPrivateState(
-          witnessSpecs,
+        // Only constructor-referenced witnesses need real values at Deploy.
+        // Remaining witness slots get placeholders until a later circuit Call.
+        const requiredNames = this.witnessOpts.requiredWitnessNamesAtDeploy ?? [];
+        const requiredSpecs =
+          requiredNames.length > 0
+            ? witnessSpecsForNames(witnessSpecs, requiredNames)
+            : witnessSpecs;
+        const requiredNameSet = new Set(requiredSpecs.map((s) => s.name));
+        const optionalSpecs = witnessSpecs.filter((s) => !requiredNameSet.has(s.name));
+
+        const requiredState = requireUserPrivateState(
+          requiredSpecs,
           this.witnessOpts.witnessValues,
-          "Deploy (constructor uses witnesses)",
+          "Deploy (constructor uses these witnesses)",
         );
+        const placeholderState = createPlaceholderPrivateState(optionalSpecs);
+        initialPrivateState = { ...placeholderState, ...requiredState };
       } else {
         initialPrivateState =
           tryBuildPrivateStateFromValues(witnessSpecs, this.witnessOpts.witnessValues) ??
@@ -450,14 +472,32 @@ export class PlaygroundContractAPI {
     const options: Record<string, unknown> = { compiledContract, contractAddress };
 
     if (privateStateId && witnessSpecs.length > 0) {
-      const fromUser = requireUserPrivateState(
-        witnessSpecs,
-        this.witnessOpts.witnessValues,
-        "Call",
-      );
+      const requiredNames = this.witnessOpts.requiredWitnessNamesAtCall;
+      let privateState: PlaygroundPrivateState;
+      if (requiredNames) {
+        const requiredSpecs = witnessSpecsForNames(witnessSpecs, requiredNames);
+        const requiredNameSet = new Set(requiredSpecs.map((s) => s.name));
+        const optionalSpecs = witnessSpecs.filter((s) => !requiredNameSet.has(s.name));
+        const requiredState =
+          requiredSpecs.length > 0
+            ? requireUserPrivateState(
+                requiredSpecs,
+                this.witnessOpts.witnessValues,
+                "Call (this circuit uses these witnesses)",
+              )
+            : {};
+        const placeholderState = createPlaceholderPrivateState(optionalSpecs);
+        privateState = { ...placeholderState, ...requiredState };
+      } else {
+        privateState = requireUserPrivateState(
+          witnessSpecs,
+          this.witnessOpts.witnessValues,
+          "Call",
+        );
+      }
       options.privateStateId = privateStateId;
-      options.initialPrivateState = fromUser;
-      savePrivateStateBackup(contractAddress, fromUser);
+      options.initialPrivateState = privateState;
+      savePrivateStateBackup(contractAddress, privateState);
     }
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
