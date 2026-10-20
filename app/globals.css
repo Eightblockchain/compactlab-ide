@@ -156,6 +156,24 @@ body {
   display: none;
 }
 
+/* Keep autocomplete / hover above the bottom Logs panel */
+.monaco-editor .overflowingContentWidgets,
+.monaco-editor .suggest-widget,
+.editor-widget.suggest-widget {
+  z-index: 40 !important;
+}
+.monaco-editor .overflowingContentWidgets .suggest-widget {
+  z-index: 40 !important;
+}
+/* Fixed-position widgets (fixedOverflowWidgets: true) attach under body */
+body > .monaco-editor,
+.overflowingContentWidgets {
+  z-index: 40;
+}
+.suggest-widget {
+  z-index: 50 !important;
+}
+
 /* Status indicator pulse */
 @keyframes status-pulse {
   0% { opacity: 1; transform: scale(1); }

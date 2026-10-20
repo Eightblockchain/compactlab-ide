@@ -181,6 +181,8 @@ export interface IDEStore {
   // Actions — logs
   addLog: (log: LogEntry) => void;
   clearLogs: () => void;
+  /** Remove logs matching a source (e.g. silent typecheck explanations). */
+  clearLogsBySource: (source: string) => void;
 
   // Actions — wallet (real connect lives in useMidnightWallet; this syncs UI state)
   setWalletState: (wallet: WalletState) => void;
@@ -1332,6 +1334,8 @@ export const useIDEStore = create<IDEStore>()(
       addLog: (log) =>
         set((s) => ({ logs: [...s.logs.slice(-500), log] })),
       clearLogs: () => set({ logs: [] }),
+      clearLogsBySource: (source) =>
+        set((s) => ({ logs: s.logs.filter((l) => l.source !== source) })),
 
       setWalletState: (wallet) => set({ wallet }),
       setFeeMode: (feeMode) => set({ feeMode: normalizeFeeMode(feeMode) }),
