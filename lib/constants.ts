@@ -51,7 +51,7 @@ export const COMPACT_TEMPLATES: Record<TemplateKey, CompactTemplate> = {
         name: "hello-world.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.22;
+        content: `pragma language_version >= 0.23;
 
 import CompactStandardLibrary;
 
@@ -296,7 +296,7 @@ to the ledger from a parameter — protecting against accidental data leaks.
         name: "counter.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.22;
+        content: `pragma language_version >= 0.23;
 
 import CompactStandardLibrary;
 
@@ -363,7 +363,7 @@ An on-chain counter backed by Compact's built-in \`Counter\` ledger type.
         name: "voting.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.22;
+        content: `pragma language_version >= 0.23;
 
 import CompactStandardLibrary;
 
@@ -474,7 +474,7 @@ secret ballot needs a different design, such as commit-reveal or hidden tallies.
         name: "bulletin-board.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.22;
+        content: `pragma language_version >= 0.23;
 
 import CompactStandardLibrary;
 
@@ -575,7 +575,7 @@ The secret never leaves the proof generation step.
         name: "owned.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.22;
+        content: `pragma language_version >= 0.23;
 
 import CompactStandardLibrary;
 
@@ -669,7 +669,7 @@ Demonstrates the standard admin ownership pattern in Compact.
         name: "token.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.22;
+        content: `pragma language_version >= 0.23;
 
 import CompactStandardLibrary;
 
@@ -779,7 +779,7 @@ An ERC-20 style token with public balances stored in a \`Map\`.
         name: "registry.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.22;
+        content: `pragma language_version >= 0.23;
 
 import CompactStandardLibrary;
 
@@ -863,7 +863,7 @@ In Compact itself, use: \`pad(32, "literal-string")\`.
         name: "profile.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.22;
+        content: `pragma language_version >= 0.23;
 
 import CompactStandardLibrary;
 
@@ -987,7 +987,7 @@ profiles.insert(disclose(caller), disclose(PlayerProfile {
         name: "escrow.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.22;
+        content: `pragma language_version >= 0.23;
 
 import CompactStandardLibrary;
 
@@ -1096,7 +1096,7 @@ parameters or witnesses need the explicit \`disclose()\` annotation.
         name: "commitment.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.22;
+        content: `pragma language_version >= 0.23;
 
 import CompactStandardLibrary;
 
@@ -1203,7 +1203,7 @@ The foundational ZK primitive: prove you know a secret without revealing it.
         name: "contract.compact",
         language: "compact",
         folder: "contracts",
-        content: `pragma language_version >= 0.22;
+        content: `pragma language_version >= 0.23;
 
 import CompactStandardLibrary;
 
