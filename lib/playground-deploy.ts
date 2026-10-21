@@ -24,6 +24,7 @@ import {
   type DeployableTemplate,
 } from "@/lib/playground-assets";
 import { PREPROD_CONFIG } from "@/lib/hello-midnight/types";
+import { reportFunnelEvent } from "@/lib/funnel-events";
 import {
   isWalletSessionExpiredError,
   isWalletSessionExpiredMessage,
@@ -311,6 +312,13 @@ export async function deployPlaygroundContract(
       "warn",
       "Click View contract in Network / Contract UI, or open the 1AM link above. Compact ids are hex, not Subscan accounts.",
     );
+
+  reportFunnelEvent("deploy_ok", {
+    projectId: options?.projectId ?? undefined,
+    template,
+    contractAddress,
+    feeMode,
+  });
 
   return {
     success: true,

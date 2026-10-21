@@ -13,6 +13,7 @@ import { generateId } from "@/lib/utils";
 import type { LogEntry } from "@/lib/compact";
 import { resolveAssetBase, bundledAssetBase } from "@/lib/playground-assets";
 import { PREPROD_CONFIG } from "@/lib/hello-midnight/types";
+import { reportFunnelEvent } from "@/lib/funnel-events";
 
 function log(addLog: (l: LogEntry) => void, level: LogEntry["level"], message: string) {
   addLog({ id: generateId(), timestamp: Date.now(), level, message, source: "network" });
@@ -152,6 +153,13 @@ export async function callPlaygroundCircuit(
     if (txResult.returnValue && txResult.returnValue !== "[]") {
       log(addLog, "info", `Circuit return: ${txResult.returnValue}`);
     }
+    reportFunnelEvent("call_ok", {
+      projectId: options?.projectId ?? undefined,
+      template,
+      contractAddress,
+      circuit: circuitName,
+      feeMode,
+    });
     return txResult;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
