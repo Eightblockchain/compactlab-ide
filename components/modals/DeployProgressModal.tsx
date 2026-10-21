@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import type { DeployResult } from "@/lib/compact";
 import type { DeployStage } from "@/lib/playground-deploy";
 import { oneAmContractUrl, oneAmTxUrl } from "@/lib/explorers";
+import { useActiveNetwork } from "@/lib/user-settings";
 
 export type DeployUiStage = "connect" | "fees" | DeployStage;
 
@@ -25,12 +26,12 @@ const STEPS: Array<{ id: DeployUiStage; title: string; hint: string }> = [
   {
     id: "connect",
     title: "Connect 1AM",
-    hint: "Unlock 1AM on Preprod and approve this site",
+    hint: "Unlock 1AM on the network set in Settings and approve this site",
   },
   {
     id: "fees",
     title: "Confirm tDUST",
-    hint: "Self-pay uses your Preprod tDUST. Fund tNIGHT at the faucet if empty.",
+    hint: "Self-pay uses your tDUST. Fund tNIGHT at the faucet if empty.",
   },
   {
     id: "artifacts",
@@ -39,7 +40,7 @@ const STEPS: Array<{ id: DeployUiStage; title: string; hint: string }> = [
   },
   {
     id: "providers",
-    title: "Reach Midnight Preprod",
+    title: "Reach the Midnight network",
     hint: "Indexer, wallet, and contract providers",
   },
   {
@@ -74,6 +75,7 @@ export function DeployProgressModal({
   onOpenContractUi,
   onViewLogs,
 }: Props) {
+  const network = useActiveNetwork();
   const [now, setNow] = useState(() => Date.now());
   const [copied, setCopied] = useState(false);
 
@@ -152,14 +154,14 @@ export function DeployProgressModal({
                 ? "Your contract is live"
                 : failed
                   ? "Deploy did not finish"
-                  : "Deploying to Midnight Preprod"}
+                  : `Deploying to Midnight ${network.label}`}
             </h2>
             <p className="text-sm text-text-muted leading-relaxed">
               {succeeded
-                ? `${projectName} is published on Preprod. Save the address before you leave.`
+                ? `${projectName} is published on ${network.label}. Save the address before you leave.`
                 : failed
                   ? `${projectName} · ${elapsed}`
-                  : `Publishing ${projectName}. This creates a permanent Preprod address.`}
+                  : `Publishing ${projectName}. This creates a permanent ${network.label} address.`}
             </p>
           </div>
           {succeeded && (
@@ -248,7 +250,7 @@ export function DeployProgressModal({
 
         {running && (
           <p className="text-xs text-text-secondary leading-relaxed rounded-lg px-3 py-2.5 bg-accent/[0.06] border border-accent/15">
-            Keep 1AM unlocked on Preprod. You can hide this dialog and follow Network logs; deploy
+            Keep 1AM unlocked on {network.label}. You can hide this dialog and follow Network logs; deploy
             continues in the background.
           </p>
         )}

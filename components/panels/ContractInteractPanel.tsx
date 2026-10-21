@@ -24,6 +24,9 @@ import {
 } from "@/lib/compact-values";
 import { isVoidCircuitOutput } from "@/lib/compact-runtime-format";
 import { normalizeFeeMode } from "@/lib/fee-mode";
+import { NETWORKS } from "@/lib/network";
+import { useActiveNetwork, useUserSettings } from "@/lib/user-settings";
+import { explainIndexerLimit } from "@/lib/indexer-endpoints";
 import {
   PanelEmpty,
   PanelHint,
@@ -144,38 +147,47 @@ export function ContractInteractPanel() {
   const [lastTx, setLastTx] = useState<{ hash: string; blockHeight: number | null } | null>(null);
   const [stateLoading, setStateLoading] = useState(false);
   const [stateError, setStateError] = useState<string | null>(null);
+  const network = useActiveNetwork();
+  const setNetwork = useUserSettings((s) => s.setNetwork);
+  // Contracts live on one network; the saved deploy may be on the other one.
+  const deployedOn =
+    deployResult?.contractAddress && deployResult.contractAddress === activeAddress
+      ? NETWORKS[deployResult.network ?? "preprod"]
+      : null;
+  const wrongNetwork = deployedOn !== null && deployedOn.id !== network.id;
+  const networkId = network.id;
 
+  const projectTemplate = activeProject?.template;
+  const projectArtifactBase = activeProject?.artifactBaseUrl;
   const fetchState = useCallback(
     async (addr: string) => {
       if (!addr.trim()) return;
       setStateLoading(true);
       setStateError(null);
       try {
-        if (isOutdatedManagedArtifactUrl(activeProject?.artifactBaseUrl)) {
+        if (isOutdatedManagedArtifactUrl(projectArtifactBase)) {
           setDecodedState(null);
           setStateError(OUTDATED_ARTIFACT_MESSAGE);
-        } else if (activeProject?.template || activeProject?.artifactBaseUrl) {
+        } else if (projectTemplate || projectArtifactBase) {
           const { readPlaygroundState } = await import("@/lib/playground-call");
           try {
-            const snapshot = await readPlaygroundState(activeProject.template, addr, {
-              artifactBaseUrl: activeProject.artifactBaseUrl,
+            const snapshot = await readPlaygroundState(projectTemplate ?? "", addr, {
+              artifactBaseUrl: projectArtifactBase,
             });
             setDecodedState(snapshot);
             setStateError(null);
           } catch (err) {
-            const message = err instanceof Error ? err.message : "Could not decode ledger";
+            const message =
+              explainIndexerLimit(err) ?? (err instanceof Error ? err.message : "Could not decode ledger");
             setDecodedState(null);
             setStateError(message);
           }
         }
-        const { apiFetch } = await import("@/lib/api");
-        const res = await apiFetch("/v1/indexer", {
-          method: "POST",
-          json: {
-            query: `{ contractAction(address: "${addr}") { address state transaction { hash block { height } } } }`,
-          },
-        });
-        const json = (await res.json()) as IndexerResponse;
+        const { queryIndexerGraphql } = await import("@/lib/indexer-endpoints");
+        const json = await queryIndexerGraphql<NonNullable<IndexerResponse["data"]>>(
+          `{ contractAction(address: "${addr}") { address state transaction { hash block { height } } } }`,
+          NETWORKS[networkId],
+        );
         const action = json.data?.contractAction;
         if (action?.transaction?.hash) {
           setLastTx({
@@ -186,12 +198,14 @@ export function ContractInteractPanel() {
           setLastTx(null);
         }
       } catch (err) {
-        setStateError((prev) => prev ?? (err instanceof Error ? err.message : "Indexer unreachable"));
+        const message = explainIndexerLimit(err) ?? (err instanceof Error ? err.message : "Indexer unreachable");
+        setStateError((prev) => prev ?? message);
       } finally {
         setStateLoading(false);
       }
     },
-    [activeProject?.template, activeProject?.artifactBaseUrl],
+    // networkId: re-read the ledger after a network switch.
+    [projectTemplate, projectArtifactBase, networkId],
   );
 
   useEffect(() => {
@@ -301,7 +315,7 @@ export function ContractInteractPanel() {
       const feeMode = normalizeFeeMode(useIDEStore.getState().feeMode);
       if (feeMode === "self" && lace.dustBalance?.isEmpty) {
         const msg =
-          "Your tDUST balance is 0. Fund tNIGHT at https://faucet.preprod.midnight.network/ and wait for Dust generation.";
+          `Your tDUST balance is 0. Fund tNIGHT at ${network.faucetUrl} and wait for Dust generation.`;
         addLog({
           id: generateId(),
           timestamp: Date.now(),
@@ -333,7 +347,7 @@ export function ContractInteractPanel() {
       );
       setLastResult({
         success: true,
-        message: result.status ? `Confirmed (${result.status})` : "Confirmed on Preprod",
+        message: result.status ? `Confirmed (${result.status})` : `Confirmed on ${network.label}`,
         txId: result.txId,
         txHash: result.txHash,
         status: result.status,
@@ -364,6 +378,7 @@ export function ContractInteractPanel() {
 
     setCallingCircuit(null);
   }, [
+    network,
     selected,
     callingCircuit,
     circuitInputs,
@@ -445,6 +460,18 @@ export function ContractInteractPanel() {
           </p>
         </div>
       )}
+      {wrongNetwork && deployedOn && (
+        <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2.5 space-y-1.5">
+          <p className="text-xs font-medium text-warning">Deployed on {deployedOn.label}</p>
+          <p className="text-xs text-text-secondary leading-relaxed">
+            This contract lives on {deployedOn.label}, but CompactLab is set to {network.label}. Ledger reads and
+            calls only work on the network it was deployed to.
+          </p>
+          <Button size="sm" onClick={() => setNetwork(deployedOn.id)}>
+            Switch to {deployedOn.label}
+          </Button>
+        </div>
+      )}
       <div className="rounded-lg border border-border/80 bg-white/[0.02] px-3 py-2.5 space-y-2">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
@@ -463,7 +490,7 @@ export function ContractInteractPanel() {
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
             <Badge variant="info" size="sm">
-              preprod
+              {network.id}
             </Badge>
             <button
               type="button"
@@ -503,7 +530,7 @@ export function ContractInteractPanel() {
         )}
         {stateError && !decodedState && (
           <div className="rounded-md border border-warning/30 bg-warning/8 px-2.5 py-2 space-y-1">
-            <p className="text-xs text-warning leading-relaxed">{stateError}</p>
+            <p className="text-xs text-warning leading-relaxed break-all">{stateError}</p>
           </div>
         )}
         {!stateLoading && !stateError && ledgerEntries.length === 0 && !showExportHint && (

@@ -3,10 +3,10 @@
 import { useState } from "react";
 import { Button, Badge } from "@/components/ui";
 import { useIDEStore } from "@/store/ide";
+import { useActiveNetwork } from "@/lib/user-settings";
 import { cn } from "@/lib/utils";
 import {
   LEARN_DOCS_HOME,
-  LEARN_FAUCET_URL,
   LEARN_TOPICS,
   type LearnCodeBlock,
   type LearnTopic,
@@ -18,6 +18,7 @@ import {
 
 export function LearnPanel() {
   const [activeId, setActiveId] = useState<string | null>(null);
+  const network = useActiveNetwork();
   const setNewProjectModalOpen = useIDEStore((s) => s.setNewProjectModalOpen);
 
   const topic = activeId ? LEARN_TOPICS.find((t) => t.id === activeId) : null;
@@ -41,12 +42,12 @@ export function LearnPanel() {
           </a>
           <span className="text-2xs text-text-muted">·</span>
           <a
-            href={LEARN_FAUCET_URL}
+            href={network.faucetUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="text-2xs text-text-secondary hover:text-text-primary underline decoration-white/20 underline-offset-2"
           >
-            Preprod faucet ↗
+            {network.label} faucet ↗
           </a>
         </div>
       </div>

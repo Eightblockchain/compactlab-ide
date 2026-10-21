@@ -3,6 +3,8 @@
 import { useIDEStore } from "@/store/ide";
 import { useLaceWallet } from "@/hooks/useLaceWallet";
 import { cn } from "@/lib/utils";
+import { requestOpenSettings, useActiveNetwork } from "@/lib/user-settings";
+import { useOwnBlockfrostKey } from "@/lib/own-blockfrost-key";
 import {
   APP_VERSION,
   COMPACT_COMPILER_PACKAGE,
@@ -18,6 +20,13 @@ export function StatusBar() {
   const status = useIDEStore((s) => s.status);
   const lace = useLaceWallet();
   const connected = lace.status === "connected" && !!lace.connectedAPI;
+  const network = useActiveNetwork();
+  const ownKey = useOwnBlockfrostKey();
+  const indexerNote = network.publicIndexer
+    ? "free public indexer"
+    : ownKey
+      ? "your Blockfrost key"
+      : "CompactLab shared indexer";
   const address = lace.walletInfo?.unshieldedAddress;
 
   const activity =
@@ -31,10 +40,15 @@ export function StatusBar() {
 
   return (
     <footer className="flex-shrink-0 h-6 flex items-center gap-4 px-3 border-t border-border bg-background text-[11px] text-text-muted select-none">
-      <span className="flex items-center gap-1.5" title="CompactLab deploys to Midnight Preprod only">
+      <button
+        type="button"
+        onClick={requestOpenSettings}
+        className="flex items-center gap-1.5 hover:text-text-secondary transition-colors"
+        title={`Midnight ${network.label} · ${indexerNote}. Change in Settings.`}
+      >
         <span className="w-1.5 h-1.5 rounded-full bg-success" aria-hidden />
-        Midnight Preprod
-      </span>
+        Midnight {network.label}
+      </button>
 
       <span className="flex items-center gap-1.5" title={connected ? address : "Deploy and Call need the 1AM wallet"}>
         <span

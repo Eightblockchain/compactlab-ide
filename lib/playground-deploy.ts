@@ -23,7 +23,10 @@ import {
   resolveAssetBase,
   type DeployableTemplate,
 } from "@/lib/playground-assets";
-import { PREPROD_CONFIG } from "@/lib/hello-midnight/types";
+import { networkConfig } from "@/lib/hello-midnight/types";
+import { getActiveNetwork } from "@/lib/user-settings";
+import { explainIndexerLimit, indexerSource } from "@/lib/indexer-endpoints";
+import { oneAmContractUrl } from "@/lib/explorers";
 import { reportFunnelEvent } from "@/lib/funnel-events";
 import {
   isWalletSessionExpiredError,
@@ -70,7 +73,9 @@ export async function deployPlaygroundContract(
   const stage = (s: DeployStage) => options?.onStage?.(s);
   stage("artifacts");
 
-  const feeMode = options?.feeMode ?? "self";
+  const network = getActiveNetwork();
+  // CompactLab's fee sponsor runs on Preprod only.
+  const feeMode = network.sponsorship ? (options?.feeMode ?? "self") : "self";
   log(
     "info",
     feeMode === "sponsored"
@@ -172,8 +177,8 @@ export async function deployPlaygroundContract(
   }
 
   stage("providers");
-  log("info", "Connecting to Midnight Preprod…");
-  log("info", `Indexer: ${PREPROD_CONFIG.indexerUri}`);
+  log("info", `Connecting to Midnight ${network.label}…`);
+  log("info", INDEXER_SOURCE_LOG[indexerSource(network)](network.label));
   log("info", "ZK proving will run in the 1AM wallet (no local Docker proof server).");
 
   const { createContractProviders, PlaygroundContractAPI } = await import(
@@ -184,7 +189,7 @@ export async function deployPlaygroundContract(
   try {
     providers = await createContractProviders(
       connectedAPI as Parameters<typeof createContractProviders>[0],
-      PREPROD_CONFIG,
+      networkConfig(network),
       assetBase,
       { storeName: `compactlab:${slug}`, feeMode },
     );
@@ -203,8 +208,10 @@ export async function deployPlaygroundContract(
       };
     }
     log("error", `Failed to initialise providers: ${msg}`);
+    const limit = explainIndexerLimit(err);
+    if (limit) log("warn", limit);
     if (msg.toLowerCase().includes("getprovingprovider") || msg.toLowerCase().includes("1am")) {
-      log("warn", "Install and connect 1AM from https://1am.xyz/ (Preprod).");
+      log("warn", `Install and connect 1AM from https://1am.xyz/ (${network.label}).`);
     }
     return { success: false, duration: Date.now() - t0, error: `Provider setup failed: ${msg}` };
   }
@@ -270,6 +277,8 @@ export async function deployPlaygroundContract(
       };
     }
     log("error", `Deploy transaction failed: ${msg}`);
+    const limit = explainIndexerLimit(msg);
+    if (limit) log("warn", limit);
     const lower = msg.toLowerCase();
     if (lower.includes("version mismatch") || lower.includes("runtime mismatch")) {
       log(
@@ -290,10 +299,10 @@ export async function deployPlaygroundContract(
       );
     }
     if (lower.includes("balance") || lower.includes("insufficient") || lower.includes("funds")) {
-      log("warn", "Insufficient tDUST on Preprod. Faucet: https://faucet.preprod.midnight.network/");
+      log("warn", `Insufficient tDUST on ${network.label}. Faucet: ${network.faucetUrl}`);
     }
     if (lower.includes("1am") || lower.includes("proving") || lower.includes("getprovingprovider")) {
-      log("warn", "Ensure 1AM is unlocked on Preprod and approved proving for this site.");
+      log("warn", `Ensure 1AM is unlocked on ${network.label} and approved proving for this site.`);
     }
     return { success: false, duration: Date.now() - t0, error: msg };
   }
@@ -303,7 +312,7 @@ export async function deployPlaygroundContract(
   log("success", `Address: ${contractAddress}`);
     log(
       "info",
-      `View contract: https://explorer.1am.xyz/contract/${contractAddress}?network=preprod`,
+      `View contract: ${oneAmContractUrl(contractAddress, network.id)}`,
     );
     if (transactionHash) {
       log("info", `Tx: ${transactionHash}`);
@@ -326,5 +335,12 @@ export async function deployPlaygroundContract(
     transactionHash,
     blockNumber,
     duration,
+    network: network.id,
   };
 }
+
+const INDEXER_SOURCE_LOG = {
+  public: (label: string) => `Indexer: ${label} public indexer (free, no key).`,
+  "own-key": (label: string) => `Indexer: ${label} via your own Blockfrost key (direct from this browser).`,
+  compactlab: (label: string) => `Indexer: ${label} via the CompactLab API (shared Blockfrost quota).`,
+} as const;

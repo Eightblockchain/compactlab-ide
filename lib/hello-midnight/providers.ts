@@ -76,10 +76,10 @@ export async function createHelloWorldProviders(
     CostModel.initialCostModel(),
   );
 
-  const publicDataProvider = indexerPublicDataProvider(
-    config.indexerUri,
-    config.indexerWsUri,
-  );
+  const { getIndexerEndpoints } = await import("@/lib/indexer-endpoints");
+  const { networkInfoFor } = await import("@/lib/network");
+  const indexer = await getIndexerEndpoints(networkInfoFor(config.networkId));
+  const publicDataProvider = indexerPublicDataProvider(indexer.indexerUri, indexer.indexerWsUri);
 
   const storagePassword = `${coinPublicKey}!Mn`;
   const privateStateProvider = levelPrivateStateProvider<

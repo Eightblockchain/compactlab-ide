@@ -133,7 +133,7 @@ export function DeployConstructorModal({
               ? "Fill constructor arguments and the private witnesses this constructor calls. Other witnesses are not needed until Call."
               : hasWitnesses
                 ? "This constructor calls the witnesses below. Other declared witnesses are not required at Deploy."
-                : "These run once when the contract is created on Preprod. You cannot change them after Deploy."}
+                : "These run once when the contract is created on-chain. You cannot change them after Deploy."}
           </p>
         </div>
 

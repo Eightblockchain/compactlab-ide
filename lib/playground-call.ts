@@ -12,7 +12,9 @@ import type { ContractAddress } from "@midnight-ntwrk/compact-runtime";
 import { generateId } from "@/lib/utils";
 import type { LogEntry } from "@/lib/compact";
 import { resolveAssetBase, bundledAssetBase } from "@/lib/playground-assets";
-import { PREPROD_CONFIG } from "@/lib/hello-midnight/types";
+import { networkConfig } from "@/lib/hello-midnight/types";
+import { getActiveNetwork } from "@/lib/user-settings";
+import { explainIndexerLimit } from "@/lib/indexer-endpoints";
 import { reportFunnelEvent } from "@/lib/funnel-events";
 
 function log(addLog: (l: LogEntry) => void, level: LogEntry["level"], message: string) {
@@ -56,7 +58,9 @@ export async function callPlaygroundCircuit(
     );
   }
 
-  const feeMode = options?.feeMode ?? "self";
+  const network = getActiveNetwork();
+  // CompactLab's fee sponsor runs on Preprod only.
+  const feeMode = network.sponsorship ? (options?.feeMode ?? "self") : "self";
   log(
     addLog,
     "info",
@@ -123,7 +127,7 @@ export async function callPlaygroundCircuit(
 
   const providers = await createContractProviders(
     connectedAPI as Parameters<typeof createContractProviders>[0],
-    PREPROD_CONFIG,
+    networkConfig(network),
     assetBase,
     { storeName: `compactlab:${slug}`, feeMode },
   );
@@ -174,6 +178,11 @@ export async function callPlaygroundCircuit(
       );
       throw new Error(WALLET_SESSION_EXPIRED_MSG);
     }
+    const limit = explainIndexerLimit(msg);
+    if (limit) {
+      log(addLog, "warn", limit);
+      throw new Error(limit);
+    }
     const lower = msg.toLowerCase();
     if (lower.includes("not the current owner")) {
       log(
@@ -203,12 +212,12 @@ export async function readPlaygroundState(
   );
   const { getPublicStates } = await import("@midnight-ntwrk/midnight-js-contracts");
 
-  setNetworkId(PREPROD_CONFIG.networkId);
+  const network = getActiveNetwork();
+  setNetworkId(network.id);
 
-  const publicDataProvider = indexerPublicDataProvider(
-    PREPROD_CONFIG.indexerUri,
-    PREPROD_CONFIG.indexerWsUri,
-  );
+  const { getIndexerEndpoints } = await import("@/lib/indexer-endpoints");
+  const indexer = await getIndexerEndpoints(network);
+  const publicDataProvider = indexerPublicDataProvider(indexer.indexerUri, indexer.indexerWsUri);
 
   const states = await getPublicStates(
     publicDataProvider,

@@ -276,7 +276,7 @@ to the ledger from a parameter — protecting against accidental data leaks.
 
 | | URL |
 |---|---|
-| Indexer | \`https://indexer.preprod.midnight.network/api/v3/graphql\` |
+| Indexer | \`https://midnight-preprod.blockfrost.io/api/v0\` (Blockfrost, needs a project id) |
 | Node RPC | \`wss://rpc.preprod.midnight.network\` |
 | Faucet (tDUST) | \`https://faucet.preprod.midnight.network/\` |
 | 1AM wallet | \`https://1am.xyz/\` |
@@ -1344,9 +1344,14 @@ import { setNetworkId, NetworkId }              from "@midnight-ntwrk/midnight-j
 import type { MidnightProvider }                from "@midnight-ntwrk/midnight-js-types";
 import type { DAppConnectorWalletAPI }          from "@midnight-ntwrk/dapp-connector-api";
 
+// Midnight's own Preprod indexer was retired on 2026-10-09; Blockfrost hosts it.
+// Create a Preprod project at https://blockfrost.io. In production, proxy these
+// through your backend so the project id isn't exposed in the browser.
+const BLOCKFROST_PROJECT_ID = "<your-nightpreprod-project-id>";
+
 export const NETWORK_CONFIG = {
-  indexer:    "https://indexer.preprod.midnight.network/api/v3/graphql",
-  indexerWS:  "wss://indexer.preprod.midnight.network/api/v3/graphql/ws",
+  indexer:    \`https://midnight-preprod.blockfrost.io/api/v0?project_id=\${BLOCKFROST_PROJECT_ID}\`,
+  indexerWS:  \`wss://midnight-preprod.blockfrost.io/api/v0/ws?project_id=\${BLOCKFROST_PROJECT_ID}\`,
   node:       "wss://rpc.preprod.midnight.network",
   networkId:  NetworkId.TestNet,
   faucet:     "https://faucet.preprod.midnight.network/",
