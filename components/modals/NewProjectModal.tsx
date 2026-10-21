@@ -181,12 +181,6 @@ function ModalContent({ initialTemplate, onClose }: { initialTemplate: string; o
 
   return (
     <>
-      {/* Accent bar */}
-      <div
-        className="absolute top-0 left-0 right-0 h-[2px] rounded-t-2xl"
-        style={{ background: "linear-gradient(90deg, transparent, #F06358 40%, #f5786d 60%, transparent)" }}
-      />
-
       {/* Header */}
       <div className="flex items-center justify-between px-6 pt-6 pb-4 flex-shrink-0">
         <div className="flex items-center gap-3">
@@ -229,7 +223,7 @@ function ModalContent({ initialTemplate, onClose }: { initialTemplate: string; o
             placeholder="My Midnight Contract"
             className="w-full rounded-lg px-3 py-2.5 text-sm text-text-primary placeholder:text-text-dim focus:outline-none transition-colors"
             style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }}
-            onFocus={(e) => (e.currentTarget.style.borderColor = "rgba(240,99,88,0.45)")}
+            onFocus={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.28)")}
             onBlur={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)")}
           />
           {/* Browser-local project id preview (not a real filesystem path) */}
@@ -259,7 +253,7 @@ function ModalContent({ initialTemplate, onClose }: { initialTemplate: string; o
             rows={2}
             className="w-full rounded-lg px-3 py-2.5 text-sm text-text-primary placeholder:text-text-dim focus:outline-none transition-colors resize-none"
             style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.1)" }}
-            onFocus={(e) => (e.currentTarget.style.borderColor = "rgba(240,99,88,0.45)")}
+            onFocus={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.28)")}
             onBlur={(e) => (e.currentTarget.style.borderColor = "rgba(255,255,255,0.1)")}
           />
         </div>
@@ -360,18 +354,11 @@ function ModalContent({ initialTemplate, onClose }: { initialTemplate: string; o
           onClick={handleCreate}
           disabled={!name.trim()}
           className={cn(
-            "flex items-center gap-2 px-5 py-2 rounded-lg text-sm font-medium transition-all",
-            name.trim() ? "text-white hover:opacity-90 active:scale-[0.98]" : "opacity-40 cursor-not-allowed text-white"
+            "flex items-center gap-2 px-4 h-8 rounded-md text-sm font-medium text-white bg-accent border border-white/10 transition-colors",
+            name.trim() ? "hover:bg-accent-hover" : "opacity-40 cursor-not-allowed"
           )}
-          style={{
-            background: "linear-gradient(135deg, #F06358, #f5786d)",
-            boxShadow: name.trim() ? "0 4px 16px rgba(240,99,88,0.35)" : "none",
-          }}
         >
-          <svg viewBox="0 0 12 12" fill="none" className="w-3.5 h-3.5" stroke="currentColor" strokeWidth="1.5">
-            <path d="M6 1v10M1 6h10" strokeLinecap="round" />
-          </svg>
-          Create Project
+          Create project
         </button>
       </div>
     </>
@@ -413,11 +400,11 @@ export function NewProjectModal() {
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.96, y: 10 }}
             transition={{ type: "spring", damping: 28, stiffness: 380 }}
-            className="relative w-full max-w-[560px] max-h-[88vh] flex flex-col overflow-hidden rounded-2xl"
+            className="relative w-full max-w-[560px] max-h-[88vh] flex flex-col overflow-hidden rounded-xl"
             style={{
-              background: "#131313",
+              background: "#121215",
               border: "1px solid rgba(255,255,255,0.1)",
-              boxShadow: "0 32px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(240,99,88,0.08)",
+              boxShadow: "0 32px 80px -16px rgba(0,0,0,0.8)",
             }}
             onClick={(e) => e.stopPropagation()}
           >

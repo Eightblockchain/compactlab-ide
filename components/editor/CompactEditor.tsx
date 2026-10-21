@@ -330,7 +330,7 @@ export function CompactEditor() {
   );
 
   return (
-    <div className="flex flex-col h-full w-full" style={{ background: "#111111" }}>
+    <div className="flex flex-col h-full w-full" style={{ background: "#0c0c0e" }}>
       <EditorTabBar />
 
       <div className="flex-1 overflow-hidden relative">
@@ -365,7 +365,7 @@ export function CompactEditor() {
           onChange={handleChange}
           onMount={handleEditorMount}
           loading={
-            <div className="flex items-center justify-center h-full" style={{ background: "#111111" }}>
+            <div className="flex items-center justify-center h-full" style={{ background: "#0c0c0e" }}>
               <div className="flex items-center gap-2 text-sm" style={{ color: "#636360" }}>
                 <div
                   className="w-4 h-4 rounded-full border-2 animate-spin"
@@ -379,7 +379,7 @@ export function CompactEditor() {
             fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
             fontSize: editorFontSize,
             fontLigatures: true,
-            lineHeight: Math.round(editorFontSize * 1.7),
+            lineHeight: Math.round(editorFontSize * 1.55),
             tabSize: editorTabSize,
             minimap: { enabled: false },
             scrollbar: {
@@ -389,6 +389,8 @@ export function CompactEditor() {
               horizontalScrollbarSize: 4,
             },
             lineNumbers: "on",
+            lineNumbersMinChars: 3,
+            lineDecorationsWidth: 10,
             glyphMargin: true,
             folding: true,
             foldingHighlight: false,
@@ -399,7 +401,7 @@ export function CompactEditor() {
             wordWrap: "on",
             // Extra bottom pad so the caret near the panel still has room; widgets
             // use fixedOverflowWidgets so suggestions are not clipped by panels.
-            padding: { top: 20, bottom: 72 },
+            padding: { top: 12, bottom: 72 },
             fixedOverflowWidgets: true,
             suggest: {
               showKeywords: true,

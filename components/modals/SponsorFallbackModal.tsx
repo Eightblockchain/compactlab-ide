@@ -39,9 +39,9 @@ export function SponsorFallbackModal({ open, reason, syncing, onChoose }: Props)
         role="dialog"
         aria-modal="true"
         aria-labelledby="sponsor-fallback-title"
-        className="relative w-full max-w-[440px] rounded-2xl p-5 space-y-4"
+        className="relative w-full max-w-[440px] rounded-xl p-5 space-y-4"
         style={{
-          background: "#131313",
+          background: "#121215",
           border: "1px solid rgba(255,255,255,0.1)",
           boxShadow: "0 32px 80px rgba(0,0,0,0.7)",
         }}

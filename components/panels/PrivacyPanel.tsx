@@ -11,6 +11,7 @@ import {
   PanelRowButton,
   PanelSection,
 } from "@/components/panels/inspector-chrome";
+import { ContractStructure } from "@/components/panels/ContractStructure";
 
 const KIND_META: Record<PrivacyKind, { label: string; swatch: string; chip: string }> = {
   private: {
@@ -65,7 +66,7 @@ export function PrivacyPanel() {
   }
 
   return (
-    <div className="p-4 space-y-5 animate-[fade-in_0.15s_ease-out]">
+    <div className="p-3 space-y-4 animate-[fade-in_0.15s_ease-out]">
       <PanelHint label="Reading this view">
         Witnesses and circuit args stay private. Ledger is public.{" "}
         <span className="font-mono text-accent">disclose()</span> is an intentional leak. Hashes hide
@@ -174,6 +175,8 @@ export function PrivacyPanel() {
           </div>
         )}
       </PanelSection>
+
+      <ContractStructure />
     </div>
   );
 }

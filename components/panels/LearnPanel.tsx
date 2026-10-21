@@ -24,7 +24,7 @@ export function LearnPanel() {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex-shrink-0 px-3 pt-1 pb-3 border-b border-border space-y-2">
+      <div className="flex-shrink-0 px-4 pb-3 border-b border-border space-y-2">
         <p className="text-xs text-text-secondary leading-relaxed">
           Concepts and examples from Midnight Compact docs. Language{" "}
           <span className="font-mono text-text-primary">{COMPACT_LANGUAGE_VERSION}</span>, compiler{" "}
@@ -35,7 +35,7 @@ export function LearnPanel() {
             href={LEARN_DOCS_HOME}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-2xs text-accent hover:underline"
+            className="text-2xs text-text-secondary hover:text-text-primary underline decoration-white/20 underline-offset-2"
           >
             Official docs ↗
           </a>
@@ -44,7 +44,7 @@ export function LearnPanel() {
             href={LEARN_FAUCET_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-2xs text-accent hover:underline"
+            className="text-2xs text-text-secondary hover:text-text-primary underline decoration-white/20 underline-offset-2"
           >
             Preprod faucet ↗
           </a>
@@ -75,22 +75,15 @@ function TopicIndex({
 }) {
   return (
     <div className="p-4 space-y-4">
-      <div className="p-3 bg-info/6 border border-info/15 rounded-md">
-        <p className="text-xs text-text-secondary leading-relaxed">
-          Start with Midnight / Compact / ZK, then pragma vs compiler, ledger, circuits vs witnesses,
-          and disclose(). Each topic has a Create action that opens a matching CompactLab template.
-        </p>
-      </div>
-
-      <div className="space-y-1.5">
+      <div className="-mx-1.5">
         {LEARN_TOPICS.map((t, i) => (
           <button
             key={t.id}
             type="button"
             onClick={() => onSelect(t.id)}
             className={cn(
-              "w-full text-left p-3 rounded-md border border-border bg-surface-2",
-              "hover:border-border-strong hover:bg-white/[0.03] transition-colors",
+              "w-full text-left px-2.5 py-2 rounded-md",
+              "hover:bg-white/[0.04] transition-colors",
             )}
           >
             <div className="flex items-start gap-2.5">
