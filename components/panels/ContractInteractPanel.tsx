@@ -809,7 +809,7 @@ function JoinAnother({
               }}
               placeholder="Contract address…"
               spellCheck={false}
-              className="flex-1 min-w-0 bg-[#0f0f0f] border border-border rounded-md px-2.5 py-1.5 text-xs font-mono text-text-primary placeholder:text-text-dim focus:outline-none focus:border-accent/50"
+              className="flex-1 min-w-0 bg-surface-muted border border-border rounded-md px-2.5 py-1.5 text-xs font-mono text-text-primary placeholder:text-text-dim focus:outline-none focus:border-accent/50"
             />
             <Button size="sm" onClick={() => onLoad()} disabled={!addressInput.trim()}>
               Load

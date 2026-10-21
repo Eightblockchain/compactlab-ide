@@ -208,11 +208,11 @@ export function SettingsModal({ open, onClose }: Props) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="settings-title"
-        className="relative flex w-full max-w-[520px] max-h-[min(90vh,760px)] flex-col overflow-hidden rounded-2xl"
+        className="relative flex w-full max-w-[520px] max-h-[min(90vh,760px)] flex-col overflow-hidden rounded-xl"
         style={{
-          background: "linear-gradient(180deg, #161616 0%, #111111 100%)",
+          background: "#121215",
           border: "1px solid rgba(255,255,255,0.1)",
-          boxShadow: "0 32px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(240,99,88,0.08)",
+          boxShadow: "0 32px 80px -16px rgba(0,0,0,0.8)",
         }}
         onClick={(e) => e.stopPropagation()}
       >

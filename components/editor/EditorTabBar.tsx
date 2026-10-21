@@ -5,7 +5,6 @@ import { useIDEStore } from "@/store/ide";
 import type { ProjectFile } from "@/store/ide";
 import { FileIcon } from "@/components/ui/file-icons";
 import { cn } from "@/lib/utils";
-import { COMPACT_LANGUAGE_VERSION, COMPACT_COMPILER_PACKAGE } from "@/lib/version";
 
 // ─── Single tab ────────────────────────────────────────────────────────────────
 
@@ -28,22 +27,13 @@ function Tab({
       aria-selected={isActive}
       onClick={onActivate}
       className={cn(
-        "group relative flex items-center gap-1.5 px-3.5 h-full border-r border-border cursor-pointer select-none transition-colors flex-shrink-0",
+        "group relative flex items-center gap-1.5 pl-3 pr-2 h-full border-r border-border cursor-pointer select-none transition-colors flex-shrink-0",
         isActive
-          ? "text-text-primary"
-          : "text-text-muted hover:text-text-secondary hover:bg-white/3"
+          ? "text-text-primary bg-surface"
+          : "text-text-muted hover:text-text-secondary hover:bg-white/[0.02]"
       )}
-      style={
-        isActive
-          ? {
-              background: "#111111",
-              borderTop: "2px solid #F06358",
-              // Slight optical correction so top border doesn't add height
-              paddingTop: 2,
-            }
-          : { background: "transparent" }
-      }
     >
+      {isActive && <span className="absolute inset-x-0 top-0 h-px bg-accent" aria-hidden />}
       <span className="flex-shrink-0">
         <FileIcon filename={file.name} size={13} />
       </span>
@@ -62,10 +52,7 @@ function Tab({
               "group-hover:opacity-0"
             )}
           >
-            <span
-              className="w-1.5 h-1.5 rounded-full"
-              style={{ background: "#F06358" }}
-            />
+            <span className="w-1.5 h-1.5 rounded-full bg-text-secondary" />
           </span>
         )}
 
@@ -103,7 +90,6 @@ export function EditorTabBar() {
     isDirty,
     openTab,
     closeTab,
-    saveProject,
   } = useIDEStore();
 
   // Build the ordered list of open files from the active project
@@ -120,8 +106,7 @@ export function EditorTabBar() {
 
   return (
     <div
-      className="flex items-stretch flex-shrink-0 border-b border-border"
-      style={{ background: "#0d0d0d", height: 36 }}
+      className="flex items-stretch flex-shrink-0 h-9 border-b border-border bg-background"
     >
       {/* Scrollable tab strip */}
       <div
@@ -161,60 +146,6 @@ export function EditorTabBar() {
         <div className="flex-1 min-w-4" />
       </div>
 
-      {/* Right status info — always visible, never scrolls */}
-      <div
-        className="flex items-center gap-3 px-4 text-2xs font-mono flex-shrink-0 border-l border-border"
-        style={{ color: "#636360" }}
-      >
-        {activeFileId && activeProject && (
-          <>
-            {(() => {
-              const f = activeProject.files.find((f) => f.id === activeFileId);
-              if (!f) return null;
-              const name = f.name.toLowerCase();
-              if (name.endsWith(".compact")) {
-                return (
-                  <span
-                    style={{ color: "#555552" }}
-                    title={`Language ${COMPACT_LANGUAGE_VERSION} · compiler package +${COMPACT_COMPILER_PACKAGE}`}
-                  >
-                    Compact v{COMPACT_LANGUAGE_VERSION}
-                  </span>
-                );
-              }
-              const label =
-                name.endsWith(".md") || name.endsWith(".mdx") ? "Markdown" :
-                name.endsWith(".json") ? "JSON" :
-                name.endsWith(".ts") || name.endsWith(".tsx") ? "TypeScript" :
-                name.endsWith(".js") || name.endsWith(".jsx") ? "JavaScript" :
-                name.endsWith(".rs") ? "Rust" :
-                name.endsWith(".py") ? "Python" :
-                name.endsWith(".go") ? "Go" :
-                name.endsWith(".sol") ? "Solidity" :
-                name.endsWith(".css") ? "CSS" :
-                name.endsWith(".scss") ? "SCSS" :
-                name.endsWith(".html") ? "HTML" :
-                name.endsWith(".sh") || name.endsWith(".bash") ? "Shell" :
-                name.endsWith(".yml") || name.endsWith(".yaml") ? "YAML" :
-                name.endsWith(".toml") ? "TOML" : f.language;
-              return <span style={{ color: "#555552" }}>{label}</span>;
-            })()}
-            <span style={{ color: "#3d3d3a" }}>│</span>
-          </>
-        )}
-        <span>Midnight Preprod</span>
-        <span style={{ color: "#3d3d3a" }}>│</span>
-        <button
-          onClick={() => saveProject()}
-          title="Save (⌘S)"
-          className="flex items-center gap-1 px-1 rounded hover:bg-white/8 hover:text-text-secondary transition-colors"
-        >
-          <kbd className="font-sans">⌘S</kbd> Save
-        </button>
-        <span>
-          <kbd className="font-sans">⌘↵</kbd> Compile
-        </span>
-      </div>
     </div>
   );
 }

@@ -127,9 +127,9 @@ export function DeployProgressModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="deploy-progress-title"
-        className="relative w-full max-w-[560px] rounded-2xl p-6 sm:p-7 space-y-5"
+        className="relative w-full max-w-[560px] rounded-xl p-6 sm:p-7 space-y-5"
         style={{
-          background: "linear-gradient(180deg, #161616 0%, #111111 100%)",
+          background: "#121215",
           border: succeeded
             ? "1px solid rgba(52, 211, 153, 0.28)"
             : failed

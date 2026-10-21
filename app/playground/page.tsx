@@ -10,10 +10,9 @@ import {
 import { useIDEStore } from "@/store/ide";
 import { useAuth } from "@/hooks/useAuth";
 import { Topbar } from "@/components/layout/Topbar";
-import { OnboardingStrip } from "@/components/layout/OnboardingStrip";
-import { PublicModeBanner } from "@/components/layout/PublicModeBanner";
-import { AnnouncementBanner } from "@/components/layout/AnnouncementBanner";
-import { WorkspaceNoticeBanner } from "@/components/layout/WorkspaceNoticeBanner";
+import { NoticeBar } from "@/components/layout/NoticeBar";
+import { StatusBar } from "@/components/layout/StatusBar";
+import { HelpDrawer } from "@/components/layout/HelpDrawer";
 import { Sidebar } from "@/components/layout/Sidebar";
 import { CompactEditor } from "@/components/editor/CompactEditor";
 import { InspectorPanel } from "@/components/panels/InspectorPanel";
@@ -66,8 +65,8 @@ export default function PlaygroundPage() {
           alignItems: "center",
           justifyContent: "center",
           height: "100vh",
-          background: "#0d0d0d",
-          color: "#8a8a86",
+          background: "#09090b",
+          color: "#71717a",
           fontFamily: "'JetBrains Mono', monospace",
           fontSize: "12px",
           gap: "16px",
@@ -89,7 +88,7 @@ export default function PlaygroundPage() {
               width: 14,
               height: 14,
               borderRadius: "50%",
-              border: "2px solid #E95144",
+              border: "2px solid #F06358",
               borderTopColor: "transparent",
               animation: "spin 0.7s linear infinite",
             }}
@@ -103,10 +102,7 @@ export default function PlaygroundPage() {
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-surface">
       <Topbar />
-      <PublicModeBanner />
-      <AnnouncementBanner />
-      <WorkspaceNoticeBanner />
-      <OnboardingStrip />
+      <NoticeBar />
 
       {/* Main IDE body — flex-1 + min-h-0 are critical for nested panels */}
       <div className="flex-1 min-h-0 overflow-hidden">
@@ -114,20 +110,20 @@ export default function PlaygroundPage() {
           {/* Sidebar */}
           {sidebarOpen && (
             <>
-              <Panel id="sidebar" defaultSize="14%" minSize="10%" maxSize="25%">
+              <Panel id="sidebar" defaultSize="15%" minSize="220px" maxSize="25%">
                 <div className="h-full overflow-hidden">
                   <Sidebar />
                 </div>
               </Panel>
               <PanelResizeHandle
                 id="sep-sidebar"
-                style={{ width: 1, background: "rgba(255,255,255,0.07)", cursor: "col-resize", flexShrink: 0 }}
+                style={{ width: 1, cursor: "col-resize" }}
               />
             </>
           )}
 
           {/* Center: editor + bottom panel */}
-          <Panel id="center-area" defaultSize={sidebarOpen ? "58%" : "72%"} minSize="25%">
+          <Panel id="center-area" defaultSize={sidebarOpen ? "59%" : "74%"} minSize="25%">
             <PanelGroup orientation="vertical" id="compactlab-v" style={{ height: "100%" }}>
               <Panel id="editor" defaultSize={bottomPanelOpen ? "68%" : "100%"} minSize="25%">
                 <div className="h-full overflow-hidden">
@@ -139,7 +135,7 @@ export default function PlaygroundPage() {
                 <>
                   <PanelResizeHandle
                     id="sep-bottom"
-                    style={{ height: 1, background: "rgba(255,255,255,0.07)", cursor: "row-resize", flexShrink: 0 }}
+                    style={{ height: 1, cursor: "row-resize" }}
                   />
                   <Panel id="bottom" defaultSize="32%" minSize="15%" maxSize="60%">
                     <div className="h-full overflow-hidden">
@@ -154,9 +150,9 @@ export default function PlaygroundPage() {
           {/* Inspector — right panel */}
           <PanelResizeHandle
             id="sep-inspector"
-            style={{ width: 1, background: "rgba(255,255,255,0.07)", cursor: "col-resize", flexShrink: 0 }}
+            style={{ width: 1, cursor: "col-resize" }}
           />
-          <Panel id="inspector" defaultSize="28%" minSize="20%" maxSize="45%">
+          <Panel id="inspector" defaultSize="26%" minSize="300px" maxSize="45%">
             <div className="h-full overflow-hidden">
               <InspectorPanel />
             </div>
@@ -165,9 +161,11 @@ export default function PlaygroundPage() {
       </div>
 
       {!bottomPanelOpen && <CollapsedBottomBar />}
+      <StatusBar />
 
       {/* Global modal layer */}
       <NewProjectModal />
+      <HelpDrawer />
     </div>
   );
 }
@@ -175,7 +173,7 @@ export default function PlaygroundPage() {
 function CollapsedBottomBar() {
   const { setBottomPanelOpen, logs } = useIDEStore();
   return (
-    <div className="flex items-center h-7 px-4 bg-surface border-t border-border flex-shrink-0 gap-3">
+    <div className="flex items-center h-7 px-3 bg-background border-t border-border flex-shrink-0 gap-3">
       <button
         onClick={() => setBottomPanelOpen(true)}
         className="flex items-center gap-1.5 text-xs text-text-muted hover:text-text-primary transition-colors"
@@ -183,9 +181,9 @@ function CollapsedBottomBar() {
         <svg className="w-3.5 h-3.5 rotate-180" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.3">
           <path d="M2 4l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
-        Output Panel
+        Output
         {logs.length > 0 && (
-          <span className="ml-1 text-2xs bg-accent/20 text-accent rounded-sm px-1">{logs.length}</span>
+          <span className="ml-0.5 text-2xs font-mono bg-white/[0.06] text-text-muted rounded px-1">{logs.length}</span>
         )}
       </button>
     </div>

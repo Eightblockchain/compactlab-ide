@@ -259,7 +259,7 @@ export function ZkArtifactsPanel({ className }: { className?: string }) {
         <Button
           size="xs"
           variant="ghost"
-          onClick={() => setRightPanelTab("source-scan")}
+          onClick={() => setRightPanelTab("privacy")}
           title="Source scan of your .compact"
         >
           Source

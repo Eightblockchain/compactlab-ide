@@ -2,27 +2,27 @@
 @import "tailwindcss";
 
 @theme inline {
-  /* ─── CompactLab Dark — deep dark, F06358 brand, warm-neutral syntax ────
-     One shade family: shell at #0d0d0d, editor at #111111, cards at #191919.
-     No browns, no blues, no purples. Text is crisp off-white on dark.
+  /* ─── CompactLab Dark — refined neutral ────────────────────────────────
+     Zinc-neutral surfaces, hairline borders, one coral accent (F06358).
+     shell #09090b · panels #0c0c0e · raised (menus/cards) #151518.
   ─────────────────────────────────────────────────────────────────────── */
-  --color-background: #0d0d0d;
-  --color-surface: #111111;
-  --color-surface-2: #191919;
-  --color-surface-muted: #0a0a0a;
+  --color-background: #09090b;
+  --color-surface: #0c0c0e;
+  --color-surface-2: #151518;
+  --color-surface-muted: #070708;
   --color-accent: #F06358;
-  --color-accent-dim: rgba(240,99,88,0.15);
-  --color-accent-hover: #f5786d;
-  --color-border: rgba(255,255,255,0.09);
-  --color-border-strong: rgba(255,255,255,0.16);
-  --color-text-primary: #eeeeee;
-  --color-text-secondary: #999999;
-  --color-text-muted: #636360;
-  --color-text-dim: #3d3d3a;
-  --color-success: #7dba84;
-  --color-warning: #d4a853;
-  --color-error: #F06358;
-  --color-info: #d4a853;
+  --color-accent-dim: rgba(240,99,88,0.14);
+  --color-accent-hover: #f47b71;
+  --color-border: rgba(255,255,255,0.07);
+  --color-border-strong: rgba(255,255,255,0.13);
+  --color-text-primary: #ececee;
+  --color-text-secondary: #a1a1aa;
+  --color-text-muted: #71717a;
+  --color-text-dim: #46464d;
+  --color-success: #4fbf86;
+  --color-warning: #e0a84f;
+  --color-error: #f06358;
+  --color-info: #8aa4f8;
 
   /* Typography */
   --font-sans: 'Inter', system-ui, sans-serif;
@@ -77,8 +77,8 @@ html, body {
 }
 
 body {
-  background: #0d0d0d;
-  color: #eeeeee;
+  background: #09090b;
+  color: #ececee;
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 13px;
   -webkit-font-smoothing: antialiased;
@@ -88,40 +88,40 @@ body {
 
 /* Scrollbar styling */
 ::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+  width: 6px;
+  height: 6px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.12);
-  border-radius: 2px;
+  background: rgba(255,255,255,0.09);
+  border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255,255,255,0.20);
+  background: rgba(255,255,255,0.16);
 }
 
 /* Selection */
 ::selection {
-  background: rgba(233,81,68,0.25);
+  background: rgba(240,99,88,0.28);
   color: #ffffff;
 }
 
 /* Focus ring */
 :focus-visible {
-  outline: 1px solid rgba(233,81,68,0.6);
-  outline-offset: 2px;
+  outline: 1px solid rgba(240,99,88,0.55);
+  outline-offset: 1px;
 }
 
 /* Resizable panels — react-resizable-panels v4 uses role="separator" */
 [role="separator"] {
-  background: rgba(255,255,255,0.07);
+  background: rgba(255,255,255,0.06);
   transition: background 0.15s;
   flex-shrink: 0;
 }
 [role="separator"]:hover {
-  background: rgba(233,81,68,0.35) !important;
+  background: rgba(240,99,88,0.45) !important;
 }
 /* Ensure panel groups fill their containers */
 [data-group] {
@@ -133,16 +133,16 @@ body {
 .monaco-editor,
 .monaco-editor-background,
 .monaco-editor .margin {
-  background-color: #111111 !important;
+  background-color: #0c0c0e !important;
 }
 .monaco-editor .line-numbers {
-  color: #3a3a38 !important;
+  color: #3f3f46 !important;
 }
 .monaco-editor .active-line-number {
-  color: #888884 !important;
+  color: #a1a1aa !important;
 }
 .monaco-editor .current-line {
-  background: rgba(255,255,255,0.035) !important;
+  background: rgba(255,255,255,0.025) !important;
   border: none !important;
 }
 .monaco-editor .cursor {

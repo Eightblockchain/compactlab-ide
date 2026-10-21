@@ -24,7 +24,8 @@ import {
 } from "@/lib/fee-mode";
 
 export type IDEStatus = "idle" | "compiling" | "deploying" | "saving";
-export type PanelTab = "contract-ui" | "source-scan" | "privacy" | "learn";
+/** Inspector tabs. Source scan lives inside Privacy; Learn lives in the help drawer. */
+export type PanelTab = "contract-ui" | "privacy";
 export type LogTab = "logs" | "compile" | "network";
 export type { FeeMode };
 
@@ -121,6 +122,8 @@ export interface IDEStore {
   logs: LogEntry[];
   logTab: LogTab;
   rightPanelTab: PanelTab;
+  /** Help drawer (Learn topics, docs links). Not persisted. */
+  helpOpen: boolean;
   bottomPanelOpen: boolean;
   sidebarOpen: boolean;
 
@@ -191,6 +194,7 @@ export interface IDEStore {
 
   // Actions — UI
   setRightPanelTab: (tab: PanelTab) => void;
+  setHelpOpen: (open: boolean) => void;
   setLogTab: (tab: LogTab) => void;
   setBottomPanelOpen: (open: boolean) => void;
   setSidebarOpen: (open: boolean) => void;
@@ -314,6 +318,7 @@ export const useIDEStore = create<IDEStore>()(
 
       logs: [],
       rightPanelTab: "contract-ui",
+      helpOpen: false,
       logTab: "logs",
       bottomPanelOpen: true,
       sidebarOpen: true,
@@ -1342,6 +1347,7 @@ export const useIDEStore = create<IDEStore>()(
       setSponsorStatus: (sponsorStatus) => set({ sponsorStatus }),
 
       setRightPanelTab: (rightPanelTab) => set({ rightPanelTab }),
+      setHelpOpen: (helpOpen) => set({ helpOpen }),
       setLogTab: (logTab) => set({ logTab }),
       setBottomPanelOpen: (bottomPanelOpen) => set({ bottomPanelOpen }),
       setSidebarOpen: (sidebarOpen) => set({ sidebarOpen }),
@@ -1360,8 +1366,6 @@ export const useIDEStore = create<IDEStore>()(
         if (
           state?.rightPanelTab &&
           state.rightPanelTab !== "contract-ui" &&
-          state.rightPanelTab !== "source-scan" &&
-          state.rightPanelTab !== "learn" &&
           state.rightPanelTab !== "privacy"
         ) {
           state.rightPanelTab = "contract-ui";
@@ -1389,6 +1393,11 @@ export const useIDEStore = create<IDEStore>()(
         if (!state) return;
         state.compactVersion = COMPACT_STABLE_VERSION;
         state.projectsHydrated = false;
+        // Older sessions may have persisted the removed "source-scan" / "learn" tabs.
+        const persistedTab = state.rightPanelTab as string;
+        if (persistedTab !== "contract-ui" && persistedTab !== "privacy") {
+          state.rightPanelTab = persistedTab === "source-scan" ? "privacy" : "contract-ui";
+        }
         // Persisted "sponsored" must not survive when the flag is off.
         state.feeMode = normalizeFeeMode(state.feeMode);
         const proj = state.projects?.find(

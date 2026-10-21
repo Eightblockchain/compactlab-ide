@@ -77,10 +77,15 @@ export function PanelEmpty({
   detail?: string;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
-      <div className="w-8 h-8 rounded-full border border-border bg-white/[0.02] mb-3" />
-      <p className="text-xs text-text-secondary">{title}</p>
-      {detail && <p className="mt-1 text-2xs text-text-dim max-w-[220px] leading-relaxed">{detail}</p>}
+    <div className="flex flex-col items-center justify-center py-8 px-4 text-center">
+      <div className="w-8 h-8 rounded-lg border border-border bg-white/[0.02] mb-3 flex items-center justify-center text-text-muted">
+        <svg viewBox="0 0 16 16" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.2" aria-hidden>
+          <path d="M8 1.75l5.5 3.1v6.3L8 14.25l-5.5-3.1v-6.3L8 1.75z" strokeLinejoin="round" />
+          <path d="M2.5 4.85L8 8l5.5-3.15M8 8v6.25" strokeLinejoin="round" />
+        </svg>
+      </div>
+      <p className="text-xs font-medium text-text-secondary">{title}</p>
+      {detail && <p className="mt-1 text-2xs text-text-muted max-w-[240px] leading-relaxed">{detail}</p>}
     </div>
   );
 }
@@ -119,7 +124,7 @@ export function PanelField({
 }
 
 export const panelInputClass =
-  "w-full bg-[#0f0f0f] border border-border rounded-md px-2.5 py-1.5 text-xs font-mono text-text-primary placeholder:text-text-dim focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-colors";
+  "w-full bg-surface-muted border border-border rounded-md px-2.5 py-1.5 text-xs font-mono text-text-primary placeholder:text-text-dim focus:outline-none focus:border-accent/50 focus:ring-1 focus:ring-accent/20 transition-colors";
 
 export function PanelStat({
   label,

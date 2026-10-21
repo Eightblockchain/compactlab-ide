@@ -113,11 +113,11 @@ export function DeployConstructorModal({
         role="dialog"
         aria-modal="true"
         aria-labelledby="deploy-setup-title"
-        className="relative w-full max-w-[540px] rounded-2xl p-5 space-y-4 max-h-[85vh] overflow-y-auto"
+        className="relative w-full max-w-[540px] rounded-xl p-5 space-y-4 max-h-[85vh] overflow-y-auto"
         style={{
-          background: "linear-gradient(180deg, #161616 0%, #111111 100%)",
+          background: "#121215",
           border: "1px solid rgba(255,255,255,0.1)",
-          boxShadow: "0 32px 80px rgba(0,0,0,0.7), 0 0 0 1px rgba(240,99,88,0.08)",
+          boxShadow: "0 32px 80px -16px rgba(0,0,0,0.8)",
         }}
         onClick={(e) => e.stopPropagation()}
       >

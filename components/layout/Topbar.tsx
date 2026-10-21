@@ -1,8 +1,15 @@
 "use client";
 
 import { useIDEStore } from "@/store/ide";
-import { Button, StatusDot, Divider } from "@/components/ui";
-import { cn, generateId } from "@/lib/utils";
+import {
+  Button,
+  IconButton,
+  Menu,
+  MenuItem,
+  MenuLabel,
+  MenuSeparator,
+} from "@/components/ui";
+import { cn } from "@/lib/utils";
 import { useState, useRef, useEffect, useCallback } from "react";
 import {
   useLaceWallet,
@@ -62,6 +69,7 @@ export function Topbar() {
     setWalletState,
     renameProject,
     setRightPanelTab,
+    setHelpOpen,
     upsertGeneratedFiles,
     setCode,
     witnessValues,
@@ -823,19 +831,16 @@ export function Topbar() {
 
   return (
     <>
-    <header className="min-h-[3.75rem] h-[3.75rem] flex items-center gap-2 px-4 sm:px-5 bg-surface border-b border-border flex-shrink-0">
-      <div className="flex items-center gap-2.5 mr-3 min-w-0">
-        <a
-          href="/playground"
-          className="flex items-center flex-shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
-          aria-label="Compact Lab playground"
-        >
-          <CompactLabLogo height={26} className="h-[26px] w-auto max-w-[148px]" />
-        </a>
-        <span className="text-border-strong text-xl leading-none select-none opacity-70" aria-hidden>
-          /
-        </span>
-      </div>
+    <header className="h-11 flex items-center gap-3 pl-3.5 pr-2.5 bg-background border-b border-border flex-shrink-0">
+      <a
+        href="/playground"
+        className="flex items-center flex-shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+        aria-label="Compact Lab playground"
+      >
+        <CompactLabLogo height={18} className="h-[18px] w-auto max-w-[120px]" />
+      </a>
+
+      <span className="h-4 w-px bg-border-strong flex-shrink-0" aria-hidden />
 
       <div className="flex items-center gap-2 min-w-0">
         {editingName ? (
@@ -848,126 +853,40 @@ export function Topbar() {
               if (e.key === "Enter") commitRename();
               if (e.key === "Escape") setEditingName(false);
             }}
-            className="bg-white/6 border border-border-strong rounded px-2 py-0.5 text-sm text-text-primary focus:outline-none focus:border-accent/60 w-44"
+            className="bg-white/[0.04] border border-border-strong rounded-md px-2 h-7 text-sm text-text-primary focus:outline-none focus:border-accent/60 w-48"
             autoFocus
           />
         ) : (
           <button
             onClick={startRename}
-            className="text-sm text-text-primary hover:text-white font-medium truncate max-w-44 hover:bg-white/5 rounded px-1.5 py-0.5 transition-colors"
-            title="Click to rename"
+            className="text-sm text-text-primary font-medium truncate max-w-56 hover:bg-white/[0.05] rounded-md px-1.5 h-7 transition-colors"
+            title="Rename project"
           >
             {activeProject?.name ?? "Untitled"}
           </button>
         )}
-
-        <div className="flex items-center gap-1">
-          {saveStatus === "saved" && <span className="text-xs text-text-muted">Saved</span>}
-          {saveStatus === "saving" && (
-            <span className="text-xs text-text-muted flex items-center gap-1">
-              <span className="w-1 h-1 bg-warning rounded-full status-pulse" />
-              Saving…
-            </span>
-          )}
-          {saveStatus === "unsaved" && <span className="text-xs text-warning">Unsaved</span>}
-        </div>
+        <SaveIndicator status={saveStatus} />
       </div>
 
       <div className="flex-1" />
 
-      <div className="hidden md:flex items-center gap-2 mr-3">
-        <span
-          className="text-2xs uppercase tracking-wide px-2 py-1 rounded-md border border-border/80 text-text-muted bg-white/[0.02]"
-          title="Midnight Preprod. Deploy and Call require the 1AM wallet only."
-        >
-          Preprod · 1AM
-        </span>
-        {SPONSORED_FEES_ENABLED && (
-          <div
-            className="flex items-center rounded-md border border-border/80 bg-white/[0.02] p-0.5"
-            title={feeModeHelp(feeMode)}
-            role="group"
-            aria-label="Fee payment mode"
-          >
-            {(["sponsored", "self"] as FeeMode[]).map((mode) => {
-              const active = feeMode === mode;
-              const sponsoredUnavailable =
-                mode === "sponsored" &&
-                Boolean(sponsorStatus) &&
-                (!sponsorStatus!.enabled ||
-                  (!sponsorStatus!.healthy && !sponsorStatus!.syncing));
-              return (
-                <button
-                  key={mode}
-                  type="button"
-                  disabled={isRunning || (mode === "sponsored" && sponsoredUnavailable)}
-                  onClick={() => {
-                    if (mode === "sponsored" && sponsoredUnavailable) return;
-                    setFeeMode(mode);
-                    addLog(
-                      makeLog(
-                        "info",
-                        `Fee mode set to ${feeModeLabel(mode)}. ${feeModeHelp(mode)}`,
-                        "network",
-                      ),
-                    );
-                  }}
-                  className={cn(
-                    "text-2xs px-2 py-1 rounded transition-colors",
-                    active
-                      ? "bg-accent/20 text-text-primary"
-                      : "text-text-muted hover:text-text-primary",
-                    sponsoredUnavailable && mode === "sponsored" && "opacity-40 cursor-not-allowed",
-                  )}
-                >
-                  {feeModeLabel(mode)}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {isRunning && (status === "compiling" || status === "saving") && (
-        <div className="hidden sm:flex items-center gap-1.5 text-xs mr-2">
-          <StepBadge step={1} label="Compile" active={status === "compiling"} done={false} />
-          <div className="w-4 h-px bg-border" />
-          <StepBadge step={2} label="Prove" active={false} />
-          <div className="w-4 h-px bg-border" />
-          <StepBadge step={3} label="Submit" active={false} />
-        </div>
-      )}
-
-      {isRunning && (
-        <StatusDot
-          status="running"
-          label={
-            status === "compiling" ? "Compiling…" : status === "deploying" ? "Deploying…" : "Running…"
-          }
-          className="mr-1"
-        />
-      )}
-
-      <div className="flex items-center gap-1.5 sm:gap-2">
+      <div className="flex items-center gap-1.5">
         <Button
-          variant={walletConnected ? "ghost" : "default"}
+          variant="default"
           size="md"
           onClick={() => void handleWalletClick()}
           disabled={isRunning || lace.status === "connecting"}
           loading={lace.status === "connecting"}
           className={cn(
-            "gap-1.5",
-            walletConnected &&
-              "border border-success/25 bg-success/[0.06] text-text-primary hover:bg-success/10",
-            needsReconnect &&
-              "border border-warning/40 bg-warning/[0.08] text-text-primary hover:bg-warning/15",
+            "gap-2",
+            needsReconnect && "border-warning/40 bg-warning/[0.08] hover:bg-warning/15",
           )}
           title={
             walletConnected
               ? "Disconnect 1AM"
               : needsReconnect
                 ? lace.error ?? WALLET_SESSION_EXPIRED_MSG
-                : "Connect 1AM wallet (required for Deploy and Call). Other wallets are not supported."
+                : "Connect the 1AM wallet. Deploy and Call need it; other wallets are not supported."
           }
         >
           <span
@@ -976,53 +895,66 @@ export function Topbar() {
               walletConnected ? "bg-success" : needsReconnect ? "bg-warning" : "bg-text-muted",
             )}
           />
-          {walletConnected ? walletLabel : needsReconnect ? "Reconnect 1AM" : "Connect 1AM"}
+          {walletConnected ? (
+            <span className="font-mono text-xs">{walletLabel}</span>
+          ) : needsReconnect ? (
+            "Reconnect 1AM"
+          ) : (
+            "Connect 1AM"
+          )}
         </Button>
 
-        <Button
-          variant="default"
-          size="md"
-          onClick={() => void handleCompile(true)}
-          loading={status === "compiling"}
-          disabled={isRunning || !activeProject || !compileAllowed}
-          className="gap-1.5"
-          title={
-            compileAllowed
-              ? "Full Compact compile with ZK keys. Required before Deploy except unedited Hello/Counter."
-              : "Server Compile is disabled on this host"
-          }
-        >
-          <svg className="w-3 h-3" viewBox="0 0 12 12" fill="currentColor">
-            <path d="M2 2.5L10 6L2 9.5V2.5z" />
-          </svg>
-          Compile
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="md"
-          onClick={() => void handleCompile(false)}
-          loading={status === "compiling"}
-          disabled={isRunning || !activeProject || !compileAllowed}
-          className="gap-1.5 hidden sm:inline-flex"
-          title={
-            compileAllowed
-              ? "Typecheck only (--skip-zk). Does not prepare Deploy."
-              : "Server Compile is disabled on this host"
-          }
-        >
-          Typecheck
-        </Button>
-
-        <Divider vertical className="mx-0.5 h-5 self-center hidden sm:block" />
+        <div className="flex items-center">
+          <Button
+            variant="default"
+            size="md"
+            onClick={() => void handleCompile(true)}
+            loading={status === "compiling"}
+            disabled={isRunning || !activeProject || !compileAllowed}
+            className="rounded-r-none border-r-0 gap-1.5"
+            title={
+              compileAllowed
+                ? "Full compile with ZK keys (⌘↵). Required before Deploy, except unedited Hello World and Counter."
+                : "Server Compile is disabled on this host"
+            }
+          >
+            Compile
+          </Button>
+          <Menu
+            width={248}
+            trigger={({ open, toggle }) => (
+              <Button
+                variant="default"
+                size="md"
+                onClick={toggle}
+                disabled={isRunning || !activeProject || !compileAllowed}
+                className={cn("rounded-l-none px-1.5", open && "bg-white/[0.08]")}
+                aria-label="More compile options"
+                aria-expanded={open}
+              >
+                <Chevron />
+              </Button>
+            )}
+          >
+            <MenuItem onSelect={() => void handleCompile(true)} hint="⌘↵">
+              Compile with ZK keys
+            </MenuItem>
+            <MenuItem onSelect={() => void handleCompile(false)}>
+              Typecheck only
+            </MenuItem>
+            <p className="px-2 pb-1.5 pt-0.5 text-2xs text-text-muted leading-relaxed">
+              Typecheck skips proving keys and does not prepare Deploy.
+            </p>
+          </Menu>
+        </div>
 
         <Button
           variant="accent"
-          size="lg"
+          size="md"
           onClick={() => void handleDeploy()}
           loading={status === "deploying"}
           disabled={!deployEnabled}
-          className="gap-2 px-4 shadow-accent-glow"
+          className="px-3.5"
           title={
             !activeProject
               ? "Create or open a project first"
@@ -1031,25 +963,82 @@ export function Topbar() {
                 : deployGate.reason
           }
         >
-          <svg className="w-3.5 h-3.5" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5">
-            <path d="M6 1v7M3 5l3-4 3 4M1 10h10" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
           Deploy
         </Button>
 
-        <Button
-          variant="ghost"
-          size="md"
-          onClick={() => void handleExport()}
-          loading={exporting}
-          disabled={!activeProject || exporting || isRunning}
-          className="gap-1.5 hidden md:inline-flex"
-          title="Download project as zip (source, deployment.json, and managed keys if present)"
-        >
-          Export
-        </Button>
+        <span className="mx-1 h-4 w-px bg-border flex-shrink-0" aria-hidden />
 
-        <Divider vertical className="mx-1 h-5 self-center" />
+        <IconButton
+          size="md"
+          onClick={() => setHelpOpen(true)}
+          title="Learn Compact"
+          aria-label="Learn Compact"
+        >
+          <svg viewBox="0 0 16 16" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="1.3">
+            <circle cx="8" cy="8" r="6.25" />
+            <path d="M6.3 6.2a1.75 1.75 0 1 1 2.5 1.6c-.5.25-.8.6-.8 1.1v.35" strokeLinecap="round" />
+            <circle cx="8" cy="11.4" r="0.6" fill="currentColor" stroke="none" />
+          </svg>
+        </IconButton>
+
+        <Menu
+          width={240}
+          trigger={({ open, toggle }) => (
+            <IconButton
+              size="md"
+              onClick={toggle}
+              active={open}
+              title="More actions"
+              aria-label="More actions"
+              aria-expanded={open}
+            >
+              <svg viewBox="0 0 16 16" className="w-4 h-4" fill="currentColor">
+                <circle cx="3.5" cy="8" r="1.1" />
+                <circle cx="8" cy="8" r="1.1" />
+                <circle cx="12.5" cy="8" r="1.1" />
+              </svg>
+            </IconButton>
+          )}
+        >
+          <MenuItem
+            onSelect={() => void handleExport()}
+            disabled={!activeProject || exporting || isRunning}
+          >
+            {exporting ? "Exporting…" : "Export project (.zip)"}
+          </MenuItem>
+          {SPONSORED_FEES_ENABLED && (
+            <>
+              <MenuSeparator />
+              <MenuLabel>Network fees</MenuLabel>
+              {(["sponsored", "self"] as FeeMode[]).map((mode) => {
+                const sponsoredUnavailable =
+                  mode === "sponsored" &&
+                  Boolean(sponsorStatus) &&
+                  (!sponsorStatus!.enabled ||
+                    (!sponsorStatus!.healthy && !sponsorStatus!.syncing));
+                return (
+                  <MenuItem
+                    key={mode}
+                    checked={feeMode === mode}
+                    disabled={isRunning || sponsoredUnavailable}
+                    onSelect={() => {
+                      setFeeMode(mode);
+                      addLog(
+                        makeLog(
+                          "info",
+                          `Fee mode set to ${feeModeLabel(mode)}. ${feeModeHelp(mode)}`,
+                          "network",
+                        ),
+                      );
+                    }}
+                  >
+                    {feeModeLabel(mode)}
+                  </MenuItem>
+                );
+              })}
+            </>
+          )}
+        </Menu>
 
         {user && (
           <ProfileMenu
@@ -1150,8 +1139,6 @@ function ProfileMenu({
   onLogout: () => void;
   onOpenSettings: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const planLabel = BILLING_ENABLED
     ? entitlements?.planSlug === "paid"
       ? "Pro"
@@ -1159,189 +1146,90 @@ function ProfileMenu({
     : "Community";
   const displayName = user.name?.trim() || user.email.split("@")[0] || "Account";
 
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
   return (
-    <div className="relative" ref={menuRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className={cn(
-          "flex items-center gap-2 rounded-full pl-0.5 pr-2 py-0.5",
-          "border border-border/80 bg-white/[0.03] hover:bg-white/[0.06]",
-          "transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-accent/50",
-        )}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        title={user.email}
-      >
-        <span className="relative w-8 h-8 rounded-full overflow-hidden flex-shrink-0 ring-1 ring-white/10">
-          {user.imageUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={user.imageUrl}
-              alt=""
-              className="w-full h-full object-cover"
-              referrerPolicy="no-referrer"
-            />
-          ) : (
-            <span className="w-full h-full flex items-center justify-center bg-gradient-to-br from-accent/80 to-accent/40 text-[11px] font-semibold text-white tracking-wide">
-              {initialsFor(user)}
-            </span>
+    <Menu
+      width={248}
+      trigger={({ open, toggle }) => (
+        <button
+          type="button"
+          onClick={toggle}
+          className={cn(
+            "ml-0.5 rounded-full transition-shadow focus:outline-none focus-visible:ring-1 focus-visible:ring-accent/60",
+            open ? "ring-1 ring-border-strong" : "hover:ring-1 hover:ring-border-strong",
           )}
-        </span>
-        <span className="hidden sm:flex flex-col items-start leading-tight min-w-0 pr-0.5">
-          <span className="text-xs text-text-primary font-medium truncate max-w-[120px]">
-            {displayName}
-          </span>
-          <span className="text-2xs text-text-muted">{planLabel}</span>
-        </span>
-        <svg
-          className={cn("w-3 h-3 text-text-muted transition-transform", open && "rotate-180")}
-          viewBox="0 0 12 12"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          aria-hidden
+          aria-expanded={open}
+          aria-haspopup="menu"
+          title={user.email}
         >
-          <path d="M3 4.5L6 7.5L9 4.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </button>
-
-      {open && (
-        <div
-          role="menu"
-          className="absolute right-0 top-full mt-2 z-50 w-64 rounded-lg border border-border bg-surface-2 shadow-xl overflow-hidden"
-        >
-          <div className="px-3.5 py-3 border-b border-border flex items-center gap-3">
-            <span className="relative w-10 h-10 rounded-full overflow-hidden flex-shrink-0 ring-1 ring-white/10">
-              {user.imageUrl ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img
-                  src={user.imageUrl}
-                  alt=""
-                  className="w-full h-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <span className="w-full h-full flex items-center justify-center bg-gradient-to-br from-accent/80 to-accent/40 text-xs font-semibold text-white">
-                  {initialsFor(user)}
-                </span>
-              )}
-            </span>
-            <div className="min-w-0">
-              <p className="text-sm text-text-primary font-medium truncate">{displayName}</p>
-              <p className="text-2xs text-text-muted truncate">{user.email}</p>
-            </div>
-          </div>
-
-          <div className="px-2 py-2 space-y-0.5">
-            <div className="flex items-center justify-between px-2 py-1.5 text-xs text-text-muted">
-              <span>Plan</span>
-              <span className="text-text-secondary font-medium">{planLabel}</span>
-            </div>
-            {BILLING_ENABLED && entitlements?.planSlug !== "paid" && onUpgrade && (
-              <button
-                type="button"
-                role="menuitem"
-                className="w-full text-left px-2 py-2 rounded-md text-sm text-text-primary hover:bg-white/6 transition-colors"
-                onClick={() => {
-                  setOpen(false);
-                  onUpgrade();
-                }}
-              >
-                Upgrade to Pro
-              </button>
-            )}
-            {BILLING_ENABLED && entitlements?.planSlug === "paid" && onBilling && (
-              <button
-                type="button"
-                role="menuitem"
-                className="w-full text-left px-2 py-2 rounded-md text-sm text-text-primary hover:bg-white/6 transition-colors"
-                onClick={() => {
-                  setOpen(false);
-                  onBilling();
-                }}
-              >
-                Manage billing
-              </button>
-            )}
-            <button
-              type="button"
-              role="menuitem"
-              className="w-full text-left px-2 py-2 rounded-md text-sm text-text-primary hover:bg-white/6 transition-colors"
-              onClick={() => {
-                setOpen(false);
-                onOpenSettings();
-              }}
-            >
-              Settings
-            </button>
-            <button
-              type="button"
-              role="menuitem"
-              className="w-full text-left px-2 py-2 rounded-md text-sm text-text-muted hover:text-text-primary hover:bg-white/6 transition-colors"
-              onClick={() => {
-                setOpen(false);
-                onLogout();
-              }}
-            >
-              Log out
-            </button>
-          </div>
-        </div>
+          <Avatar user={user} size={26} />
+        </button>
       )}
-    </div>
+    >
+      <div className="flex items-center gap-2.5 px-2 pt-1.5 pb-2.5">
+        <Avatar user={user} size={32} />
+        <div className="min-w-0">
+          <p className="text-sm text-text-primary font-medium truncate">{displayName}</p>
+          <p className="text-2xs text-text-muted truncate">{user.email}</p>
+        </div>
+        <span className="ml-auto text-[10px] font-medium text-text-secondary border border-border rounded px-1.5 py-0.5">
+          {planLabel}
+        </span>
+      </div>
+      <MenuSeparator />
+      {BILLING_ENABLED && entitlements?.planSlug !== "paid" && onUpgrade && (
+        <MenuItem onSelect={onUpgrade}>Upgrade to Pro</MenuItem>
+      )}
+      {BILLING_ENABLED && entitlements?.planSlug === "paid" && onBilling && (
+        <MenuItem onSelect={onBilling}>Manage billing</MenuItem>
+      )}
+      <MenuItem onSelect={onOpenSettings}>Settings</MenuItem>
+      <MenuItem onSelect={onLogout} tone="muted">
+        Log out
+      </MenuItem>
+    </Menu>
   );
 }
 
-function StepBadge({
-  step,
-  label,
-  active,
-  done,
-}: {
-  step: number;
-  label: string;
-  active?: boolean;
-  done?: boolean;
-}) {
+function Avatar({ user, size }: { user: UserPublic; size: number }) {
   return (
-    <div
-      className={cn(
-        "flex items-center gap-1 px-1.5 py-0.5 rounded-sm transition-colors",
-        active && "bg-accent/15 text-accent",
-        done && "text-text-secondary",
-        !active && !done && "text-text-muted",
-      )}
+    <span
+      className="relative rounded-full overflow-hidden flex-shrink-0 ring-1 ring-white/10 block"
+      style={{ width: size, height: size }}
     >
-      <span
-        className={cn(
-          "w-3.5 h-3.5 rounded-sm flex items-center justify-center text-2xs font-mono",
-          active && "bg-accent text-white",
-          done && "bg-white/10 text-text-secondary",
-          !active && !done && "bg-white/5 text-text-dim",
-        )}
-      >
-        {done ? "✓" : step}
+      {user.imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={user.imageUrl} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+      ) : (
+        <span className="w-full h-full flex items-center justify-center bg-surface-2 text-[10px] font-semibold text-text-secondary tracking-wide">
+          {initialsFor(user)}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function SaveIndicator({ status }: { status: string }) {
+  if (status === "saving") {
+    return <span className="text-2xs text-text-muted whitespace-nowrap">Saving…</span>;
+  }
+  if (status === "unsaved") {
+    return (
+      <span className="flex items-center gap-1 text-2xs text-warning whitespace-nowrap">
+        <span className="w-1 h-1 rounded-full bg-warning" aria-hidden />
+        Unsaved
       </span>
-      <span>{label}</span>
-    </div>
+    );
+  }
+  if (status === "saved") {
+    return <span className="text-2xs text-text-dim whitespace-nowrap">Saved</span>;
+  }
+  return null;
+}
+
+function Chevron() {
+  return (
+    <svg viewBox="0 0 12 12" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+      <path d="M3 4.5L6 7.5L9 4.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }

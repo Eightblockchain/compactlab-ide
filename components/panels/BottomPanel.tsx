@@ -34,26 +34,23 @@ export function BottomPanel() {
   ];
 
   return (
-    <div className="flex flex-col h-full bg-surface border-t border-border overflow-hidden">
+    <div className="flex flex-col h-full bg-surface overflow-hidden">
       {/* Panel header */}
-      <div className="flex items-center border-b border-border flex-shrink-0">
+      <div className="flex items-center h-8 border-b border-border bg-background flex-shrink-0">
         <Tabs
           tabs={tabs}
           activeTab={logTab}
           onTabChange={(id) => setLogTab(id as LogTab)}
           size="sm"
-          className="px-1"
+          className="px-1 h-full"
         />
 
         <div className="flex items-center gap-1 ml-auto pr-2">
-          <Button
-            variant="ghost"
-            size="xs"
-            onClick={clearLogs}
-            className="text-text-muted"
-          >
-            Clear
-          </Button>
+          {logTab === "logs" && logs.length > 0 && (
+            <Button variant="ghost" size="xs" onClick={clearLogs} className="text-text-muted">
+              Clear
+            </Button>
+          )}
           <IconButton
             size="sm"
             title={bottomPanelOpen ? "Collapse panel" : "Expand panel"}
@@ -89,13 +86,13 @@ function LogsPanel() {
   }, [logs]);
 
   return (
-    <div className="h-full overflow-y-auto p-3 font-mono text-xs space-y-0.5">
+    <div className="h-full overflow-y-auto px-3 py-2 font-mono text-xs space-y-px">
       {logs.length === 0 ? (
         <EmptyTerminal />
       ) : (
         <>
-          {logs.map((log, i) => (
-            <LogLine key={log.id} log={log} index={i} />
+          {logs.map((log) => (
+            <LogLine key={log.id} log={log} />
           ))}
           {status !== "idle" && (
             <div className="flex items-center gap-2 text-text-muted terminal-line">
@@ -109,7 +106,7 @@ function LogsPanel() {
   );
 }
 
-function LogLine({ log, index }: { log: LogEntry; index: number }) {
+function LogLine({ log }: { log: LogEntry }) {
   const colors = {
     info: "text-text-secondary",
     success: "text-success",
@@ -134,16 +131,13 @@ function LogLine({ log, index }: { log: LogEntry; index: number }) {
         "flex items-start gap-2 leading-relaxed terminal-line",
         isTypeHint ? "text-text-muted" : colors[log.level],
       )}
-      style={{ animationDelay: `${index * 15}ms` }}
     >
-      <span className="text-text-dim flex-shrink-0 w-20 text-right">
+      <span className="text-text-dim flex-shrink-0 tabular-nums">
         {formatTimestamp(log.timestamp)}
       </span>
-      {log.source && (
-        <span className="flex-shrink-0 text-text-dim opacity-60">
-          [{isTypeHint ? "hint" : log.source}]
-        </span>
-      )}
+      <span className="flex-shrink-0 w-16 truncate text-text-dim">
+        {log.source ? (isTypeHint ? "hint" : log.source) : ""}
+      </span>
       <span>
         <span className="opacity-60">{prefixes[log.level]}</span>
         {log.message}
@@ -640,10 +634,7 @@ function StatCard({ label, value, color }: { label: string; value: string; color
 function EmptyTerminal({ message = "No output yet." }: { message?: string }) {
   return (
     <div className="flex flex-col items-center justify-center h-full min-h-24 text-center">
-      <div className="text-text-dim font-mono text-xs">
-        <span className="text-accent">$</span> _
-      </div>
-      <p className="text-xs text-text-muted mt-2">{message}</p>
+      <p className="text-xs text-text-dim">{message}</p>
     </div>
   );
 }
