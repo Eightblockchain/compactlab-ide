@@ -25,7 +25,7 @@ import {
   type DetectedWallet,
 } from "@/lib/wallet-detect";
 import { readDustBalance, type DustBalanceInfo } from "@/lib/dust-balance";
-import { getUserSettingsSnapshot } from "@/lib/user-settings";
+import { getActiveNetwork, getUserSettingsSnapshot, useUserSettings } from "@/lib/user-settings";
 import {
   clearWalletRestorePreference,
   readWalletRestorePreference,
@@ -79,7 +79,8 @@ export type UseLaceWalletReturn = UseMidnightWalletReturn;
 
 const MidnightWalletContext = createContext<UseMidnightWalletReturn | null>(null);
 
-const TARGET_NETWORK = "preprod";
+/** 1AM connections are per network: always the one chosen in Settings. */
+const targetNetwork = () => getActiveNetwork().id;
 /** Silent auto-restore must not block the UI if 1AM waits for approval. */
 const SILENT_CONNECT_TIMEOUT_MS = 8_000;
 /** How often to ask 1AM whether the DApp connection is still alive. */
@@ -97,7 +98,7 @@ async function assertUsableConnection(api: ConnectedAPI): Promise<void> {
     if (attempt > 0) {
       await new Promise((r) => setTimeout(r, 250 * attempt));
     }
-    last = await probeWalletSession(api, TARGET_NETWORK);
+    last = await probeWalletSession(api, targetNetwork());
     if (last.ok || last.reason === "wrong-network") break;
   }
 
@@ -143,7 +144,7 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
   const ensureSession = useCallback(async (): Promise<ConnectedAPI | null> => {
     const api = connectedAPI;
     if (!api || status !== "connected") return null;
-    const probe = await probeWalletSession(api, TARGET_NETWORK);
+    const probe = await probeWalletSession(api, targetNetwork());
     if (probe.ok) return api;
     clearSessionLocal(
       probe.reason === "wrong-network" ? probe.detail : WALLET_SESSION_EXPIRED_MSG,
@@ -231,7 +232,7 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
     let cancelled = false;
 
     const check = async () => {
-      const probe = await probeWalletSession(connectedAPI, TARGET_NETWORK);
+      const probe = await probeWalletSession(connectedAPI, targetNetwork());
       if (cancelled) return;
       if (!probe.ok) {
         markSessionExpired(
@@ -275,7 +276,7 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
       }
 
       let timeoutId: ReturnType<typeof setTimeout> | undefined;
-      const connectPromise = wallet.api.connect(TARGET_NETWORK);
+      const connectPromise = wallet.api.connect(targetNetwork());
       const api: ConnectedAPI = options?.silent
         ? await Promise.race([
             connectPromise,
@@ -361,6 +362,21 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
     clearWalletRestorePreference();
     clearSessionLocal(null, "disconnected");
   }, [clearSessionLocal]);
+
+  // A 1AM session belongs to one network: drop it when the user switches in Settings.
+  const hasSession = useRef(false);
+  useEffect(() => {
+    hasSession.current = connectedAPI !== null;
+  }, [connectedAPI]);
+  useEffect(
+    () =>
+      useUserSettings.subscribe((next, prev) => {
+        if (next.network === prev.network || !hasSession.current) return;
+        const label = getActiveNetwork().label;
+        clearSessionLocal(`Network changed to ${label}. Switch 1AM to ${label}, then connect again.`, "disconnected");
+      }),
+    [clearSessionLocal],
+  );
 
   // After refresh: reconnect last-used 1AM if still authorized (usually no new prompt).
   // Defer so project hydrate / first paint are not blocked by a wallet prompt.

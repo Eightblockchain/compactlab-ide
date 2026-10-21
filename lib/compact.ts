@@ -84,6 +84,8 @@ export interface DeployResult {
   gasUsed?: number;
   duration: number;
   error?: string;
+  /** Network the contract was deployed on (older results: Preprod). */
+  network?: import("@/lib/network").PlaygroundNetwork;
 }
 
 /** Client helper: POST /v1/compile on the shared API (queued + polled). */

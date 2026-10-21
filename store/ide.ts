@@ -16,6 +16,7 @@ import {
   syncProjectNow,
 } from "@/lib/project-sync";
 import { makeLog } from "@/lib/compact";
+import { getActiveNetwork } from "@/lib/user-settings";
 import {
   DEFAULT_FEE_MODE,
   normalizeFeeMode,
@@ -1061,10 +1062,11 @@ export const useIDEStore = create<IDEStore>()(
           transactionHash: deployResult?.transactionHash,
           blockNumber: deployResult?.blockNumber,
           duration: deployResult?.duration ?? 0,
+          network: getActiveNetwork().id,
         };
         const payload = JSON.stringify(
           {
-            network: "preprod",
+            network: nextDeploy.network,
             contractAddress: trimmed,
             txHash: nextDeploy.transactionHash ?? null,
             blockHeight: nextDeploy.blockNumber ?? null,
@@ -1194,13 +1196,14 @@ export const useIDEStore = create<IDEStore>()(
           set({ compileResult });
         }
       },
-      setDeployResult: (deployResult) => {
+      setDeployResult: (result) => {
         // Failures are session-only. Do not persist them on the project — otherwise
         // Connect 1AM (which opens the Network panel) looks like a new failed Deploy.
-        if (!deployResult?.success) {
-          set({ deployResult });
+        if (!result?.success) {
+          set({ deployResult: result });
           return;
         }
+        const deployResult: DeployResult = { ...result, network: result.network ?? getActiveNetwork().id };
         const { activeProjectId, activeProject, projects, activeFileId, activeFile, tabBuffers } =
           get();
         if (activeProjectId && activeProject) {
@@ -1212,7 +1215,7 @@ export const useIDEStore = create<IDEStore>()(
           if (deployResult.success) {
             const payload = JSON.stringify(
               {
-                network: "preprod",
+                network: deployResult.network,
                 contractAddress: deployResult.contractAddress ?? null,
                 txHash: deployResult.transactionHash ?? null,
                 blockHeight: deployResult.blockNumber ?? null,

@@ -27,6 +27,7 @@ import { exportProjectZip, downloadBlob } from "@/lib/project-export";
 import type { UserPublic, Entitlements } from "@/lib/api";
 import { apiFetch } from "@/lib/api";
 import { BILLING_ENABLED } from "@/lib/billing";
+import { onOpenSettingsRequest, useActiveNetwork } from "@/lib/user-settings";
 import {
   SPONSORED_FEES_ENABLED,
   feeModeHelp,
@@ -90,6 +91,8 @@ export function Topbar() {
   const { user, entitlements, logout, checkout, portal } = useAuth();
   const [deployModalOpen, setDeployModalOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  useEffect(() => onOpenSettingsRequest(() => setSettingsOpen(true)), []);
+  const network = useActiveNetwork();
   const [deployStage, setDeployStage] = useState<DeployUiStage>("connect");
   const [deployStartedAt, setDeployStartedAt] = useState(0);
   const [sponsorPrompt, setSponsorPrompt] = useState<{
@@ -128,7 +131,7 @@ export function Topbar() {
           ? `${lace.dustBalance.balanceLabel} tDUST`
           : "Loading…",
         dustCap: lace.dustBalance ? `${lace.dustBalance.capLabel} tDUST` : null,
-        network: "Midnight Preprod",
+        network: `Midnight ${network.label}`,
       });
     } else if (lace.status === "disconnected" || lace.status === "error") {
       setWalletState({
@@ -136,10 +139,10 @@ export function Topbar() {
         address: null,
         balance: null,
         dustCap: null,
-        network: "Midnight Preprod",
+        network: `Midnight ${network.label}`,
       });
     }
-  }, [lace.status, lace.walletInfo, lace.dustBalance, setWalletState]);
+  }, [lace.status, lace.walletInfo, lace.dustBalance, setWalletState, network.label]);
 
   useEffect(() => {
     if (lace.status === "error" && lace.error) {
@@ -524,7 +527,7 @@ export function Topbar() {
       addLog(
         makeLog(
           "info",
-          "Deploying bundled Preprod assets for Hello/Counter (source matches template). You can Compile first if you want your own keys.",
+          "Deploying bundled ZK assets for Hello/Counter (source matches template). You can Compile first if you want your own keys.",
           "network",
         ),
       );
@@ -560,7 +563,7 @@ export function Topbar() {
       if (!connectedAPI) {
         failDeploy(
           lace.error ??
-            "Could not connect. CompactLab only supports 1AM (https://1am.xyz/). Install it, unlock it, set Preprod, approve this site, then retry.",
+            `Could not connect. CompactLab only supports 1AM (https://1am.xyz/). Install it, unlock it, set ${network.label}, approve this site, then retry.`,
         );
         return;
       }
@@ -586,10 +589,11 @@ export function Topbar() {
       /* balance probe is best-effort; Deploy still proceeds if 1AM cannot report it */
     }
 
-    let deployFeeMode = SPONSORED_FEES_ENABLED ? feeMode : "self";
+    // CompactLab's fee sponsor runs on Preprod only.
+    let deployFeeMode = SPONSORED_FEES_ENABLED && network.sponsorship ? feeMode : "self";
     if (deployFeeMode === "self" && userDustEmpty) {
       failDeploy(
-        "Your tDUST balance is 0. Fund tNIGHT at https://faucet.preprod.midnight.network/ , wait for Dust generation, then retry Deploy.",
+        `Your tDUST balance is 0. Fund tNIGHT at ${network.faucetUrl} , wait for Dust generation, then retry Deploy.`,
       );
       return;
     }
@@ -799,7 +803,7 @@ export function Topbar() {
         makeLog(
           "error",
           lace.error ??
-            "1AM required. Install from https://1am.xyz/, unlock, select Preprod, approve this site.",
+            `1AM required. Install from https://1am.xyz/, unlock, select ${network.label}, approve this site.`,
           "network",
         ),
       );
@@ -1006,7 +1010,7 @@ export function Topbar() {
           >
             {exporting ? "Exporting…" : "Export project (.zip)"}
           </MenuItem>
-          {SPONSORED_FEES_ENABLED && (
+          {SPONSORED_FEES_ENABLED && network.sponsorship && (
             <>
               <MenuSeparator />
               <MenuLabel>Network fees</MenuLabel>

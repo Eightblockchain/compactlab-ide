@@ -177,7 +177,7 @@ export function ZkArtifactsPanel({ className }: { className?: string }) {
       {bundled && !artifactBaseUrl && (
         <div className="rounded-md border border-border bg-surface-2 px-2.5 py-2 space-y-1">
           <p className="text-2xs text-text-muted">
-            Using bundled Preprod assets for this template (no Compile yet).
+            Using bundled ZK assets for this template (no Compile yet).
           </p>
           <a
             href={bundled}

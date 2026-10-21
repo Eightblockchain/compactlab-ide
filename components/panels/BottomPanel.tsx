@@ -12,6 +12,8 @@ import { lintCompactSource } from "@/lib/compact-lint";
 import { useLaceWallet } from "@/hooks/useLaceWallet";
 import { ZkArtifactsPanel } from "@/components/panels/ZkArtifactsPanel";
 import { SPONSORED_FEES_ENABLED } from "@/lib/fee-mode";
+import { NETWORKS } from "@/lib/network";
+import { useActiveNetwork } from "@/lib/user-settings";
 
 export function BottomPanel() {
   const { logTab, setLogTab, bottomPanelOpen, setBottomPanelOpen, logs, clearLogs, code, activeFile, compileResult } = useIDEStore();
@@ -338,6 +340,8 @@ function CompilePanel() {
 function NetworkPanel() {
   const { wallet, deployResult, status, feeMode, sponsorStatus, setDeployResult } = useIDEStore();
   const lace = useLaceWallet();
+  const network = useActiveNetwork();
+  const deployedOn = NETWORKS[deployResult?.network ?? "preprod"];
   const dustEmpty = lace.dustBalance?.isEmpty === true;
   const dustUnknown = wallet.connected && !lace.dustBalance && wallet.balance === "Loading…";
 
@@ -350,10 +354,10 @@ function NetworkPanel() {
           <div className="flex items-center justify-between">
             <span className="text-xs text-text-muted">Fee mode</span>
             <span className="text-xs text-text-primary">
-              {SPONSORED_FEES_ENABLED && feeMode === "sponsored" ? "Sponsored" : "Self-pay"}
+              {SPONSORED_FEES_ENABLED && network.sponsorship && feeMode === "sponsored" ? "Sponsored" : "Self-pay"}
             </span>
           </div>
-          {SPONSORED_FEES_ENABLED && feeMode === "sponsored" && (
+          {SPONSORED_FEES_ENABLED && network.sponsorship && feeMode === "sponsored" && (
             <>
               <div className="flex items-center justify-between gap-2">
                 <span className="text-xs text-text-muted">Sponsor</span>
@@ -439,7 +443,7 @@ function NetworkPanel() {
                     : "Could not read Dust yet. Click refresh or reconnect 1AM."}
                   {" "}
                   <a
-                    href="https://faucet.preprod.midnight.network/"
+                    href={network.faucetUrl}
                     target="_blank"
                     rel="noreferrer"
                     className="text-accent hover:underline"
@@ -478,7 +482,7 @@ function NetworkPanel() {
         <div className="flex items-center gap-3 p-4 bg-accent/5 border border-accent/15 rounded-md">
           <div className="w-5 h-5 rounded-full border-2 border-accent border-t-transparent animate-spin flex-shrink-0" />
           <div>
-            <p className="text-sm font-medium text-text-primary">Deploying to Midnight Preprod…</p>
+            <p className="text-sm font-medium text-text-primary">Deploying to Midnight {network.label}…</p>
             <p className="text-xs text-text-muted mt-0.5">Submitting contract and waiting for confirmation</p>
           </div>
         </div>
@@ -526,11 +530,11 @@ function NetworkPanel() {
                 <p className="text-2xs text-text-muted mb-1">Contract Address</p>
                 <div className="flex items-center gap-2">
                   <a
-                    href={oneAmContractUrl(deployResult.contractAddress)}
+                    href={oneAmContractUrl(deployResult.contractAddress, deployedOn.id)}
                     target="_blank"
                     rel="noreferrer"
                     className="text-xs font-mono text-success break-all flex-1 hover:underline"
-                    title="View contract on 1AM Explorer (Preprod)"
+                    title={`View contract on 1AM Explorer (${deployedOn.label})`}
                   >
                     {deployResult.contractAddress}
                   </a>
@@ -547,7 +551,7 @@ function NetworkPanel() {
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <a
-                    href={oneAmContractUrl(deployResult.contractAddress)}
+                    href={oneAmContractUrl(deployResult.contractAddress, deployedOn.id)}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-white bg-accent hover:opacity-90 transition-opacity"
@@ -559,7 +563,7 @@ function NetworkPanel() {
                   </a>
                   {deployResult.transactionHash && (
                     <a
-                      href={oneAmTxUrl(deployResult.transactionHash)}
+                      href={oneAmTxUrl(deployResult.transactionHash, deployedOn.id)}
                       target="_blank"
                       rel="noreferrer"
                       className="text-2xs text-accent hover:underline"
@@ -569,7 +573,7 @@ function NetworkPanel() {
                   )}
                 </div>
                 <p className="text-2xs text-text-dim mt-1.5">
-                  Opens 1AM Preprod explorer. Compact contracts are hex ids, not wallet accounts.
+                  Opens 1AM {deployedOn.label} explorer. Compact contracts are hex ids, not wallet accounts.
                 </p>
               </div>
             )}
@@ -578,7 +582,7 @@ function NetworkPanel() {
               <div>
                 <p className="text-2xs text-text-muted mb-1">Transaction Hash</p>
                 <a
-                  href={oneAmTxUrl(deployResult.transactionHash)}
+                  href={oneAmTxUrl(deployResult.transactionHash, deployedOn.id)}
                   target="_blank"
                   rel="noreferrer"
                   className="text-2xs font-mono text-text-secondary break-all hover:text-accent hover:underline"

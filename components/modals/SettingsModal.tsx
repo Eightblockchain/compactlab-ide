@@ -10,6 +10,20 @@ import { useIDEStore } from "@/store/ide";
 import { syncProjectNow } from "@/lib/project-sync";
 import { clearWalletRestorePreference } from "@/lib/wallet-restore";
 import { cn } from "@/lib/utils";
+import { NETWORKS, type PlaygroundNetwork } from "@/lib/network";
+import {
+  BLOCKFROST_SIGNUP_URL,
+  setOwnBlockfrostKey,
+  testBlockfrostKey,
+  useOwnBlockfrostKey,
+} from "@/lib/own-blockfrost-key";
+
+const NETWORK_HELP: Record<PlaygroundNetwork, string> = {
+  preprod:
+    "Default. Matches the 1AM Preprod faucet and sponsored fees. Uses CompactLab's shared indexer allowance unless you add your own Blockfrost key below.",
+  preview:
+    "Free public indexer with no shared allowance. Use the Preview faucet; sponsored fees are not available. Contracts deployed on Preprod are not visible here.",
+};
 
 type Props = {
   open: boolean;
@@ -86,7 +100,14 @@ export function SettingsModal({ open, onClose }: Props) {
     setEditorFontSize,
     editorTabSize,
     setEditorTabSize,
+    network,
+    setNetwork,
   } = useUserSettings();
+  const ownKey = useOwnBlockfrostKey();
+  const [keyInput, setKeyInput] = useState("");
+  const [keyMsg, setKeyMsg] = useState<string | null>(null);
+  const [keyErr, setKeyErr] = useState<string | null>(null);
+  const [keyBusy, setKeyBusy] = useState(false);
   const setFeeMode = useIDEStore((s) => s.setFeeMode);
 
   const [name, setName] = useState(user?.name ?? "");
@@ -113,6 +134,9 @@ export function SettingsModal({ open, onClose }: Props) {
     setPasswordMsg(null);
     setPasswordErr(null);
     setDeleteErr(null);
+    setKeyInput("");
+    setKeyMsg(null);
+    setKeyErr(null);
     setCurrentPassword("");
     setNewPassword("");
     setDeletePassword("");
@@ -135,6 +159,22 @@ export function SettingsModal({ open, onClose }: Props) {
 
   // Prefer server flag after refresh; undefined means "still loading" → password account UI.
   const hasPassword = user?.hasPassword !== false;
+
+  async function saveOwnKey(e: FormEvent) {
+    e.preventDefault();
+    setKeyBusy(true);
+    setKeyErr(null);
+    setKeyMsg(null);
+    const result = await testBlockfrostKey(keyInput);
+    setKeyBusy(false);
+    if (!result.ok) {
+      setKeyErr(result.message);
+      return;
+    }
+    setOwnBlockfrostKey(keyInput.trim());
+    setKeyInput("");
+    setKeyMsg(`Key works (Preprod block ${result.height.toLocaleString()}). Preprod traffic now goes from this browser to Blockfrost.`);
+  }
 
   async function saveProfile(e: FormEvent) {
     e.preventDefault();
@@ -225,7 +265,7 @@ export function SettingsModal({ open, onClose }: Props) {
               Settings
             </h2>
             <p className="text-sm text-text-muted leading-relaxed">
-              Privacy, wallet, editor, and account
+              Network, privacy, wallet, editor, and account
             </p>
           </div>
           <button
@@ -241,6 +281,95 @@ export function SettingsModal({ open, onClose }: Props) {
         </div>
 
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5 sm:px-6">
+          <Section title="Network">
+            <Row className="space-y-2.5">
+              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label="Midnight network">
+                {(Object.keys(NETWORKS) as PlaygroundNetwork[]).map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    role="radio"
+                    aria-checked={network === id}
+                    onClick={() => setNetwork(id)}
+                    className={cn(
+                      "rounded-lg border px-3 py-1.5 text-xs transition-colors",
+                      network === id
+                        ? "border-accent/30 bg-accent/15 text-accent"
+                        : "border-white/[0.1] text-text-secondary hover:bg-white/[0.04]",
+                    )}
+                  >
+                    {NETWORKS[id].label}
+                  </button>
+                ))}
+              </div>
+              <p className="text-2xs text-text-muted leading-relaxed">{NETWORK_HELP[network]}</p>
+              <p className="text-2xs text-text-muted leading-relaxed">
+                Switching disconnects 1AM. Set 1AM to the same network before you reconnect.
+              </p>
+            </Row>
+            <Row>
+              <form onSubmit={saveOwnKey} className="space-y-3">
+                <div>
+                  <p className="text-sm text-text-primary">Your own Blockfrost key (Preprod)</p>
+                  <p className="mt-1 text-2xs text-text-muted leading-relaxed">
+                    Optional. Skips CompactLab&apos;s shared daily allowance. Stored only in this browser and sent
+                    only to Blockfrost, never to CompactLab. Create a free Midnight Preprod project at{" "}
+                    <a
+                      href={BLOCKFROST_SIGNUP_URL}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-text-secondary underline decoration-white/20 underline-offset-2 hover:text-text-primary"
+                    >
+                      blockfrost.io
+                    </a>
+                    .
+                  </p>
+                </div>
+                {ownKey ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-mono text-xs text-text-secondary">
+                      {ownKey.slice(0, 12)}…{ownKey.slice(-4)}
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setOwnBlockfrostKey(null);
+                        setKeyMsg("Key removed. Preprod uses CompactLab's shared indexer again.");
+                      }}
+                    >
+                      Remove key
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                    <input
+                      className={cn(fieldClass, "sm:flex-1 font-mono")}
+                      type="password"
+                      autoComplete="off"
+                      spellCheck={false}
+                      placeholder="nightpreprod…"
+                      value={keyInput}
+                      onChange={(e) => setKeyInput(e.target.value)}
+                    />
+                    <Button
+                      type="submit"
+                      size="sm"
+                      loading={keyBusy}
+                      disabled={!keyInput.trim()}
+                      className="sm:flex-shrink-0"
+                    >
+                      Test and save
+                    </Button>
+                  </div>
+                )}
+                {keyErr && <p className="text-2xs text-error">{keyErr}</p>}
+                {keyMsg && <p className="text-2xs text-success">{keyMsg}</p>}
+              </form>
+            </Row>
+          </Section>
+
           <Section title="Preferences">
             <Row>
               <Toggle
@@ -268,7 +397,7 @@ export function SettingsModal({ open, onClose }: Props) {
                 description="Reconnect automatically after refresh for up to 7 days (while 1AM still authorizes this site)."
               />
             </Row>
-            {SPONSORED_FEES_ENABLED && (
+            {SPONSORED_FEES_ENABLED && NETWORKS[network].sponsorship && (
               <Row className="space-y-2.5">
                 <p className="text-sm text-text-primary">Default fee mode</p>
                 <div className="flex flex-wrap gap-2">

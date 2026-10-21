@@ -7,12 +7,15 @@ import { MIDNIGHT_WALLET_LINKS } from "@/lib/wallet-links";
 import { useIDEStore } from "@/store/ide";
 import { getDeployGate, getLiveCompactSource } from "@/lib/deploy-gate";
 import { cn } from "@/lib/utils";
+import { requestOpenSettings, useActiveNetwork, useUserSettings } from "@/lib/user-settings";
+import { useOwnBlockfrostKey } from "@/lib/own-blockfrost-key";
+import { fetchSharedIndexerStatus, type SharedIndexerStatus } from "@/lib/indexer-endpoints";
 
 /**
  * One slim bar under the Topbar. Replaces the separate public-mode,
  * announcement, workspace and onboarding banners: it shows the single most
  * important message, highest priority first:
- *   outage → workspace sync → announcements → server limits → next step.
+ *   outage → indexer allowance → workspace sync → announcements → server limits → next step.
  */
 
 type Tone = "critical" | "warning" | "info" | "guide";
@@ -29,7 +32,8 @@ type Health = { ok?: boolean; maintenance?: boolean; mode?: string; compileEnabl
 type Announcement = { id: string; message: string; severity: "info" | "warning" | "critical"; active: boolean };
 
 const GUIDE_DISMISSED_KEY = "compactlab-onboarding-dismissed";
-const FAUCET_URL = "https://faucet.preprod.midnight.network/";
+/** How often to re-check the shared Preprod indexer allowance. */
+const INDEXER_STATUS_POLL_MS = 5 * 60 * 1000;
 
 export function NoticeBar() {
   const wallet = useLaceWallet();
@@ -55,6 +59,26 @@ export function NoticeBar() {
     }
   });
   const [index, setIndex] = useState(0);
+  const network = useActiveNetwork();
+  const setNetwork = useUserSettings((s) => s.setNetwork);
+  const ownKey = useOwnBlockfrostKey();
+  const usesSharedIndexer = !network.publicIndexer && !ownKey;
+  const [indexerStatus, setIndexerStatus] = useState<SharedIndexerStatus | null>(null);
+
+  useEffect(() => {
+    if (!usesSharedIndexer) return;
+    let cancelled = false;
+    const check = () =>
+      void fetchSharedIndexerStatus().then((s) => {
+        if (!cancelled) setIndexerStatus(s);
+      });
+    check();
+    const id = setInterval(check, INDEXER_STATUS_POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [usesSharedIndexer]);
 
   useEffect(() => {
     let cancelled = false;
@@ -113,6 +137,22 @@ export function NoticeBar() {
         content: "The CompactLab API is not responding. Cloud save and Compile may fail until it recovers.",
       });
     }
+    if (usesSharedIndexer && indexerStatus && !indexerStatus.ok) {
+      out.push({
+        id: "indexer-limit",
+        tone: "warning",
+        content: (
+          <>
+            {indexerStatus.code === "INDEXER_NOT_CONFIGURED"
+              ? "This server has no Preprod indexer configured."
+              : "Today's shared Preprod indexer allowance is used up (resets 00:00 UTC)."}{" "}
+            <InlineAction onClick={requestOpenSettings}>Use your own Blockfrost key</InlineAction>
+            <span className="mx-1.5 text-text-muted">or</span>
+            <InlineAction onClick={() => setNetwork("preview")}>Switch to Preview</InlineAction>
+          </>
+        ),
+      });
+    }
     if (workspaceNotice) {
       out.push({
         id: "workspace",
@@ -146,7 +186,17 @@ export function NoticeBar() {
       });
     }
     return out;
-  }, [health, workspaceNotice, setWorkspaceNotice, announcements, dismissed, compilerMissing]);
+  }, [
+    health,
+    usesSharedIndexer,
+    indexerStatus,
+    setNetwork,
+    workspaceNotice,
+    setWorkspaceNotice,
+    announcements,
+    dismissed,
+    compilerMissing,
+  ]);
 
   const guide = useMemo<Notice | null>(() => {
     if (guideDismissed || !activeProject) return null;
@@ -173,14 +223,14 @@ export function NoticeBar() {
     } else if (!walletConnected) {
       step = (
         <>
-          Connect 1AM to deploy on Preprod.{" "}
+          Connect 1AM to deploy on {network.label}.{" "}
           <InlineAction onClick={() => void wallet.connect()}>Connect</InlineAction>
         </>
       );
     } else if (gate.needsCompile) {
       step = <>Run <Strong>Compile</Strong> to generate ZK keys, then Deploy.</>;
     } else if (gate.canDeploy) {
-      step = <>Ready to <Strong>Deploy</Strong>. This publishes a permanent Preprod address.</>;
+      step = <>Ready to <Strong>Deploy</Strong>. This publishes a permanent {network.label} address.</>;
     } else {
       return null;
     }
@@ -193,14 +243,14 @@ export function NoticeBar() {
           <span className="text-text-muted">Next step</span>
           <span className="mx-2 h-3 w-px bg-border-strong" aria-hidden />
           <span>{step}</span>
-          <a href={FAUCET_URL} target="_blank" rel="noreferrer" className="ml-3 text-text-muted hover:text-text-primary">
+          <a href={network.faucetUrl} target="_blank" rel="noreferrer" className="ml-3 text-text-muted hover:text-text-primary">
             Get tDUST ↗
           </a>
         </>
       ),
       onDismiss: dismissGuide,
     };
-  }, [guideDismissed, activeProject, walletConnected, wallet, gate.needsCompile, gate.canDeploy]);
+  }, [guideDismissed, activeProject, walletConnected, wallet, gate.needsCompile, gate.canDeploy, network]);
 
   const queue = notices.length > 0 ? notices : guide ? [guide] : [];
   if (queue.length === 0) return null;

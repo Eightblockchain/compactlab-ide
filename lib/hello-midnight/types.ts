@@ -6,12 +6,14 @@
 
 // ─── Network config ────────────────────────────────────────────────────────────
 
-export type NetworkId = "preprod" | "undeployed";
+import type { NetworkInfo } from "@/lib/network";
+
+export type NetworkId = "preprod" | "preview" | "undeployed";
 
 export interface NetworkConfig {
   networkId: NetworkId;
-  indexerUri: string;
-  indexerWsUri: string;
+  // Indexer endpoints are not static: see lib/indexer-endpoints.ts (Preprod
+  // goes through the CompactLab API proxy or the user's own Blockfrost key).
   substrateNodeUri: string;
   /** URL of a locally-running proof server (only needed for non-DApp-Connector proving) */
   proofServerUri?: string;
@@ -20,10 +22,12 @@ export interface NetworkConfig {
 // Preprod public endpoints (from Midnight docs)
 export const PREPROD_CONFIG: NetworkConfig = {
   networkId: "preprod",
-  indexerUri: "https://indexer.preprod.midnight.network/api/v3/graphql",
-  indexerWsUri: "wss://indexer.preprod.midnight.network/api/v3/graphql/ws",
   substrateNodeUri: "wss://rpc.preprod.midnight.network",
 };
+
+export function networkConfig(network: NetworkInfo): NetworkConfig {
+  return { networkId: network.id, substrateNodeUri: network.substrateNodeUri };
+}
 
 // ─── Wallet state ──────────────────────────────────────────────────────────────
 

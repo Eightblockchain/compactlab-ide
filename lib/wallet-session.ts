@@ -69,7 +69,7 @@ export async function probeWalletSession(
           return {
             ok: false,
             reason: "wrong-network",
-            detail: `Connected to network "${cs.networkId}" but CompactLab expects ${targetNetwork}. Switch to Preprod in 1AM.`,
+            detail: `Connected to network "${cs.networkId}" but CompactLab expects ${targetNetwork}. Switch 1AM to ${targetNetwork === "preview" ? "Preview" : "Preprod"}, or change the network in CompactLab Settings.`,
           };
         }
         return { ok: true, networkId: cs.networkId };

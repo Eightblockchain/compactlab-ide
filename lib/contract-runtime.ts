@@ -102,7 +102,7 @@ export async function createContractProviders(
 
   if (typeof wallet.getProvingProvider !== "function") {
     throw new Error(
-      'CompactLab v1 requires the 1AM wallet for ZK proving (wallet.getProvingProvider). Install 1AM from https://1am.xyz/ and connect it on Preprod.',
+      `CompactLab v1 requires the 1AM wallet for ZK proving (wallet.getProvingProvider). Install 1AM from https://1am.xyz/ and connect it on ${config.networkId === "preview" ? "Preview" : "Preprod"}.`,
     );
   }
 
@@ -121,10 +121,10 @@ export async function createContractProviders(
     CostModel.initialCostModel(),
   );
 
-  const publicDataProvider = indexerPublicDataProvider(
-    config.indexerUri,
-    config.indexerWsUri,
-  );
+  const { getIndexerEndpoints } = await import("@/lib/indexer-endpoints");
+  const { networkInfoFor } = await import("@/lib/network");
+  const indexer = await getIndexerEndpoints(networkInfoFor(config.networkId));
+  const publicDataProvider = indexerPublicDataProvider(indexer.indexerUri, indexer.indexerWsUri);
 
   const storagePassword = `${coinPublicKey}!Mn`;
   const privateStateProvider = levelPrivateStateProvider({
