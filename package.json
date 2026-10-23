@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "smoke:matrix": "npx --yes tsx scripts/smoke-matrix.ts",
     "templates:check": "npx --yes tsx scripts/templates-check.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "design:check": "node design-system/sync.mjs --check"
   },
   "dependencies": {
     "@midnight-ntwrk/compact-js": "2.5.1",

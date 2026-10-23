@@ -10,10 +10,14 @@ import {
   createCloudProject,
   deleteCloudProject,
   fetchCloudProjects,
+  flushProjectSync,
+  resetProjectSync,
   scheduleProjectSync,
+  setProjectSource,
   setProjectSyncEnabled,
   setProjectSyncErrorHandler,
   syncProjectNow,
+  unsyncedProjectIds,
 } from "@/lib/project-sync";
 import { makeLog } from "@/lib/compact";
 import { getActiveNetwork } from "@/lib/user-settings";
@@ -163,6 +167,8 @@ export interface IDEStore {
   renameFile: (fileId: string, name: string) => void;
   setCode: (code: string) => void;
   saveProject: () => void;
+  /** Write unsaved editor buffers into the project now (persisted locally) and queue a cloud save. */
+  flushEditorBuffer: () => void;
   deleteProject: (id: string) => void;
   renameProject: (id: string, name: string) => void;
   /** Load the authenticated user's projects from the API (source of truth). */
@@ -923,6 +929,32 @@ export const useIDEStore = create<IDEStore>()(
         }, 300);
       },
 
+      flushEditorBuffer: () => {
+        const { activeProject, activeFileId, code, isDirty, tabBuffers } = get();
+        if (!activeProject) return;
+        const buffers = { ...tabBuffers, ...(isDirty && activeFileId ? { [activeFileId]: code } : {}) };
+        const now = Date.now();
+        let changed = false;
+        const files = activeProject.files.map((f) => {
+          const buf = buffers[f.id];
+          if (buf === undefined || buf === f.content) return f;
+          changed = true;
+          return { ...f, content: buf, updatedAt: now };
+        });
+        if (!changed) {
+          if (isDirty) set({ isDirty: false, saveStatus: "saved" });
+          return;
+        }
+        const updated = { ...activeProject, files, updatedAt: now };
+        set((st) => ({
+          activeProject: updated,
+          projects: st.projects.map((p) => (p.id === updated.id ? updated : p)),
+          isDirty: false,
+          saveStatus: "saved",
+        }));
+        scheduleProjectSync(updated);
+      },
+
       deleteProject: (id) => {
         const { projects, activeProjectId } = get();
         const filtered = projects.filter((p) => p.id !== id);
@@ -978,6 +1010,8 @@ export const useIDEStore = create<IDEStore>()(
       },
 
       hydrateProjectsFromCloud: async () => {
+        // Anything typed but not yet autosaved goes into the local project first.
+        get().flushEditorBuffer();
         setProjectSyncEnabled(true);
         setProjectSyncErrorHandler((message) => {
           set({ workspaceNotice: message });
@@ -990,6 +1024,16 @@ export const useIDEStore = create<IDEStore>()(
               get().projects.map((p) => [p.id, p.witnessValues ?? {}] as const),
             ),
           );
+
+          // Projects with changes the cloud never confirmed (offline, maintenance, a
+          // closed tab mid-save) keep their local copy; it is pushed again below.
+          const pending = new Set(unsyncedProjectIds());
+          const local = get().projects;
+          const keptLocal = local.filter((p) => pending.has(p.id));
+          cloud = [
+            ...cloud.map((c) => keptLocal.find((l) => l.id === c.id) ?? c),
+            ...keptLocal.filter((l) => !cloud.some((c) => c.id === l.id)),
+          ];
 
           // First login: seed Hello World so public users are never at 0 projects.
           if (cloud.length === 0) {
@@ -1040,6 +1084,7 @@ export const useIDEStore = create<IDEStore>()(
             isDirty: false,
             saveStatus: "saved",
           });
+          if (pending.size) void flushProjectSync();
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
           console.warn("[ide] hydrateProjectsFromCloud failed", err);
@@ -1129,6 +1174,7 @@ export const useIDEStore = create<IDEStore>()(
 
       clearWorkspace: () => {
         setProjectSyncEnabled(false);
+        resetProjectSync();
         set({
           projects: [],
           activeProjectId: null,
@@ -1438,3 +1484,6 @@ export const useIDEStore = create<IDEStore>()(
     }
   )
 );
+
+// Cloud retries always send the latest copy of a project, not the one captured when the save was queued.
+setProjectSource((id) => useIDEStore.getState().projects.find((p) => p.id === id));

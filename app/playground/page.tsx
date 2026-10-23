@@ -18,8 +18,18 @@ import { CompactEditor } from "@/components/editor/CompactEditor";
 import { InspectorPanel } from "@/components/panels/InspectorPanel";
 import { BottomPanel } from "@/components/panels/BottomPanel";
 import { NewProjectModal } from "@/components/modals/NewProjectModal";
+import { WorkSafety } from "@/components/layout/WorkSafety";
 
 export default function PlaygroundPage() {
+  return (
+    <>
+      <WorkSafety />
+      <Playground />
+    </>
+  );
+}
+
+function Playground() {
   const {
     activeProjectId,
     projects,
@@ -30,7 +40,7 @@ export default function PlaygroundPage() {
     projectsHydrated,
     clearWorkspace,
   } = useIDEStore();
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, maintenance } = useAuth();
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
 
@@ -39,11 +49,12 @@ export default function PlaygroundPage() {
   }, []);
 
   useEffect(() => {
-    if (mounted && !authLoading && !user) {
+    // During maintenance /v1/me answers 503: the user is still signed in, so keep their workspace.
+    if (mounted && !authLoading && !user && !maintenance) {
       clearWorkspace();
       router.replace("/login");
     }
-  }, [mounted, authLoading, user, router, clearWorkspace]);
+  }, [mounted, authLoading, user, maintenance, router, clearWorkspace]);
 
   useEffect(() => {
     if (!mounted || authLoading || !user) return;

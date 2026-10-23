@@ -38,6 +38,13 @@ export class ApiError extends Error {
   }
 }
 
+/** Fired on window when any API call is refused because the host is in maintenance mode. */
+export const MAINTENANCE_EVENT = "compactlab:maintenance";
+
+export function isMaintenanceError(e: unknown): boolean {
+  return e instanceof ApiError && e.status === 503 && e.message === "Maintenance mode";
+}
+
 export function getToken(): string | null {
   if (typeof window === "undefined") return null;
   return localStorage.getItem(TOKEN_KEY);
@@ -79,7 +86,9 @@ async function request<T>(
       typeof body === "object" && body && "error" in body
         ? String((body as { error: unknown }).error)
         : res.statusText;
-    throw new ApiError(msg || "Request failed", res.status, body);
+    const err = new ApiError(msg || "Request failed", res.status, body);
+    if (isMaintenanceError(err)) window.dispatchEvent(new Event(MAINTENANCE_EVENT));
+    throw err;
   }
   return body as T;
 }
@@ -232,10 +241,15 @@ export async function apiFetch(
   if (init.json !== undefined) headers.set("Content-Type", "application/json");
   const token = getToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  return fetch(`${API_BASE.replace(/\/$/, "")}${path}`, {
+  const res = await fetch(`${API_BASE.replace(/\/$/, "")}${path}`, {
     ...init,
     headers,
     body: init.json !== undefined ? JSON.stringify(init.json) : init.body,
     credentials: "include",
   });
+  if (res.status === 503) {
+    const body = (await res.clone().json().catch(() => null)) as { error?: unknown } | null;
+    if (body?.error === "Maintenance mode") window.dispatchEvent(new Event(MAINTENANCE_EVENT));
+  }
+  return res;
 }

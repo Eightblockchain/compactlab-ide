@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -13,15 +14,24 @@ import {
   ApiError,
   createBrowserApi,
   getToken,
+  isMaintenanceError,
   setToken,
   type Entitlements,
   type UserPublic,
 } from "@/lib/api";
+import { connectMaintenance, refetchMaintenance, useMaintenance } from "@/lib/maintenance";
 
 type AuthContextValue = {
   user: UserPublic | null;
   entitlements: Entitlements | null;
   loading: boolean;
+  /**
+   * The host is in maintenance (live over WebSocket). Stays true after it ends until
+   * the session is restored, so the playground never sees a signed-out gap.
+   */
+  maintenance: boolean;
+  /** Re-check maintenance now; resolves to true while it is still on. */
+  checkMaintenance: () => Promise<boolean>;
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string, name?: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -36,6 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserPublic | null>(null);
   const [entitlements, setEntitlements] = useState<Entitlements | null>(null);
   const [loading, setLoading] = useState(true);
+  const [maintenance, setMaintenance] = useState(false);
   const api = useMemo(() => createBrowserApi(), []);
 
   const refresh = useCallback(async () => {
@@ -50,6 +61,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(me.user);
       setEntitlements(me.entitlements);
     } catch (e) {
+      // Maintenance is not a sign-out: keep the token, the user and their workspace.
+      if (isMaintenanceError(e)) {
+        setMaintenance(true);
+        return;
+      }
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
         setToken(null);
       }
@@ -63,6 +79,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  const maintenanceRef = useRef(false);
+  useEffect(() => {
+    maintenanceRef.current = maintenance;
+  }, [maintenance]);
+
+  // Live status: show maintenance the moment it starts; when it ends, restore the session first.
+  useEffect(() => {
+    connectMaintenance();
+    return useMaintenance.subscribe((state) => {
+      if (!state.status) return;
+      if (state.status.active) setMaintenance(true);
+      else if (maintenanceRef.current) void refresh().finally(() => setMaintenance(false));
+    });
+  }, [refresh]);
+
+  const checkMaintenance = useCallback(async () => {
+    const status = await refetchMaintenance();
+    return status?.active ?? maintenanceRef.current;
+  }, []);
 
   const login = useCallback(
     async (email: string, password: string) => {
@@ -116,6 +152,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       entitlements,
       loading,
+      maintenance,
+      checkMaintenance,
       login,
       signup,
       logout,
@@ -123,7 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       checkout,
       portal,
     }),
-    [user, entitlements, loading, login, signup, logout, refresh, checkout, portal],
+    [user, entitlements, loading, maintenance, checkMaintenance, login, signup, logout, refresh, checkout, portal],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -10,6 +10,8 @@ import { cn } from "@/lib/utils";
 import { requestOpenSettings, useActiveNetwork, useUserSettings } from "@/lib/user-settings";
 import { useOwnBlockfrostKey } from "@/lib/own-blockfrost-key";
 import { fetchSharedIndexerStatus, type SharedIndexerStatus } from "@/lib/indexer-endpoints";
+import { serverNow, useMaintenance, type MaintenanceWindow } from "@/lib/maintenance";
+import { formatClock, formatDuration } from "@/components/layout/MaintenanceScreen";
 
 /**
  * One slim bar under the Topbar. Replaces the separate public-mode,
@@ -121,13 +123,26 @@ export function NoticeBar() {
 
   const walletConnected = wallet.status === "connected";
 
+  const planned = useMaintenance((s) => s.status?.upcoming[0] ?? null);
+  // Re-evaluate tone as the start approaches (the text itself ticks inside PlannedMaintenance).
+  const [toneTick, setToneTick] = useState(0);
+  useEffect(() => {
+    if (!planned) return;
+    const id = setInterval(() => setToneTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, [planned]);
+
   const notices = useMemo<Notice[]>(() => {
     const out: Notice[] = [];
-    if (health?.maintenance) {
+    if (planned && !dismissed[`planned-${planned.id}`]) {
+      const startsIn = new Date(planned.startsAt).getTime() - serverNow();
+      const soon = startsIn < 60 * 60_000;
       out.push({
-        id: "maintenance",
-        tone: "critical",
-        content: "CompactLab is in maintenance mode. Deploy and Call may be unavailable.",
+        id: `planned-${planned.id}`,
+        tone: startsIn < 5 * 60_000 ? "critical" : soon ? "warning" : "info",
+        content: <PlannedMaintenance window={planned} />,
+        // Can be hidden while it is far off; within the hour it stays visible.
+        onDismiss: soon ? undefined : () => setDismissed((d) => ({ ...d, [`planned-${planned.id}`]: true })),
       });
     }
     if (health && health.ok === false) {
@@ -186,7 +201,10 @@ export function NoticeBar() {
       });
     }
     return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- toneTick re-evaluates the countdown tone
   }, [
+    planned,
+    toneTick,
     health,
     usesSharedIndexer,
     indexerStatus,
@@ -311,6 +329,35 @@ export function NoticeBar() {
 
 function Strong({ children }: { children: ReactNode }) {
   return <span className="text-text-primary font-medium">{children}</span>;
+}
+
+/** "Planned maintenance Fri, Oct 24, 14:00 – 15:00 (1 h) · starts in 42 min. Your work is saved automatically." */
+function PlannedMaintenance({ window: w }: { window: MaintenanceWindow }) {
+  const [now, setNow] = useState(() => serverNow());
+  useEffect(() => {
+    const id = setInterval(() => setNow(serverNow()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const start = new Date(w.startsAt);
+  const startsIn = start.getTime() - now;
+  const day = start.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  const length = formatDuration(new Date(w.endsAt).getTime() - start.getTime());
+  const countdown =
+    startsIn <= 0
+      ? "starting now"
+      : startsIn < 60 * 60_000
+        ? `starts in ${startsIn < 60_000 ? `${Math.ceil(startsIn / 1000)} s` : formatDuration(startsIn)}`
+        : null;
+  return (
+    <span className="truncate">
+      <span className="font-medium">Planned maintenance</span> {day}, {formatClock(w.startsAt)} – {formatClock(w.endsAt)} ({length})
+      {countdown && <span className="tabular-nums"> · {countdown}</span>}
+      <span className="text-text-muted">
+        {" "}
+        · {w.message ? `${w.message} ` : ""}Your work is saved automatically before it starts.
+      </span>
+    </span>
+  );
 }
 
 function InlineAction({ onClick, children }: { onClick: () => void; children: ReactNode }) {
