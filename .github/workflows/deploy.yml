@@ -1,0 +1,65 @@
+name: Deploy playground to VPS
+
+# Manual only: run it from the Actions tab once the server is set up
+# (docs/DEPLOY_VPS.md). Switch to `push: branches: [main]` later.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-playground
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Test & Deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install, typecheck and test
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm test
+
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT }}
+          command_timeout: 20m
+          script: |
+            set -e
+            export NVM_DIR="$HOME/.nvm"
+            [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+            cd /var/www/compactlab-ide
+
+            echo "→ Pulling latest code..."
+            git pull origin main
+
+            echo "→ Installing dependencies..."
+            pnpm install --frozen-lockfile
+
+            echo "→ Building (NEXT_PUBLIC_* come from .env.production.local)..."
+            pnpm build
+
+            echo "→ Restarting app..."
+            pm2 reload compactlab-ide --update-env || pm2 start pnpm --name compactlab-ide -- start
+
+            echo "✓ Deploy complete"

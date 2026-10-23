@@ -1,11 +1,11 @@
 # Hosting CompactLab (separate repos)
 
-Four independent apps / repos:
+Four independent apps / repos. Step-by-step VPS setup: [DEPLOY_VPS.md](./DEPLOY_VPS.md).
 
 | Repo | Default local | Prod example |
 |------|---------------|--------------|
 | `landing-page` | `:3000` | `compactlab.dev` |
-| `compactlab` | `:3001` | `play.compactlab.dev` |
+| `compactlab` | `:3001` | `playground.compactlab.dev` |
 | `admin` | `:3002` | `admin.compactlab.dev` |
 | `api` | `:4000` | `api.compactlab.dev` |
 
