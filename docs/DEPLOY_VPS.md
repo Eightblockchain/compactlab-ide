@@ -36,7 +36,7 @@ corepack enable && corepack prepare pnpm@10 --activate
 npm i -g pm2   # skip if already installed
 
 # PostgreSQL and Redis
-sudo apt install -y postgresql redis-server
+sudo apt install -y postgresql redis-server rsync
 sudo -u postgres createuser compactlab --pwprompt
 sudo -u postgres createdb -O compactlab compactlab
 
@@ -48,20 +48,11 @@ compact --version
 
 ## 3. Code
 
-`compactlab-api` is private, so the server needs a read-only deploy key for it:
+The org disables deploy keys, so the server never pulls `compactlab-api` from GitHub. The API's deploy workflow copies the code over SSH instead (step 5). Only the public playground repo is cloned:
 
 ```bash
-ssh-keygen -t ed25519 -f ~/.ssh/compactlab_api_deploy -N ""
-cat ~/.ssh/compactlab_api_deploy.pub
-# GitHub → compactlab-api → Settings → Deploy keys → Add (read-only)
-cat >> ~/.ssh/config <<'CFG'
-Host github-compactlab-api
-  HostName github.com
-  IdentityFile ~/.ssh/compactlab_api_deploy
-CFG
-
+sudo mkdir -p /var/www/compactlab-api && sudo chown "$USER" /var/www/compactlab-api
 cd /var/www
-git clone git@github-compactlab-api:Eightblockchain/compactlab-api.git
 git clone https://github.com/Eightblockchain/compactlab-ide.git
 ```
 
@@ -101,16 +92,16 @@ NEXT_PUBLIC_PLAYGROUND_URL=https://playground.compactlab.dev
 
 ## 5. First build and start
 
-```bash
-cd /var/www/compactlab-api
-pnpm install --frozen-lockfile && pnpm db:migrate:deploy && pnpm build
-NODE_ENV=production pm2 start dist/index.js --name compactlab-api
-curl -s http://127.0.0.1:4000/v1/health    # expect "ok":true
+**GitHub secrets.** Add the four secrets the landing page uses to `compactlab-api` and `compactlab-ide` (Settings → Secrets and variables → Actions): `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_PORT`. If the org restricts repository secrets, add them as organization secrets shared with the three repos.
 
+**API.** In `compactlab-api` → Actions → **Deploy API to VPS** → Run workflow. It runs the tests, copies the code to `/var/www/compactlab-api` (keeping `.env`, `.data/` and `node_modules/`), installs, migrates, builds, starts PM2 and checks `/v1/health`. It stops early if `.env` is missing.
+
+**Playground.** The first time, on the server:
+
+```bash
 cd /var/www/compactlab-ide
 pnpm install --frozen-lockfile && pnpm build
 pm2 start pnpm --name compactlab-ide -- start
-
 pm2 save
 ```
 
@@ -134,9 +125,9 @@ curl -sI https://playground.compactlab.dev/signup | head -1
 
 Then in a browser: sign up at `https://playground.compactlab.dev`, compile the Counter template with ZK, deploy and call it with 1AM on Preprod. Sign in to the admin console and change the seeded admin password.
 
-## 8. Deploy from GitHub
+## 8. Later deploys
 
-Both repos have a manual **Deploy to VPS** workflow (`.github/workflows/deploy.yml`). Each runs typecheck and tests, then SSHes in, pulls, builds and reloads PM2. Add the same four secrets the landing page uses to both repos: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`, `VPS_PORT`. Then run it from the Actions tab. Once you trust it, change its trigger to `push: branches: [main]`.
+Run **Deploy API to VPS** (compactlab-api) or **Deploy playground to VPS** (compactlab-ide) from the Actions tab. Both run typecheck and tests first. The API job copies code over SSH; the playground job runs `git pull` on the server (public repo, no key needed). Once you trust them, change their trigger to `push: branches: [main]`.
 
 ## 9. Landing page
 
