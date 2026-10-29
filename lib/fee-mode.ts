@@ -53,4 +53,25 @@ export type SponsorStatusResponse = {
   reason: string | null;
   syncing?: boolean;
   unshieldedAddress?: string | null;
+  /** This user's access: invite list and today's quota (API ≥ S05). */
+  access?: SponsorAccess;
 };
+
+export type SponsorAccess = {
+  allowed: boolean;
+  blockedBy: "allowlist" | "daily_limit" | null;
+  reason: string | null;
+  dailyLimit: number;
+  remainingToday: number;
+};
+
+/** Sponsored fees can pay for this user's next transaction right now. */
+export function sponsorUsable(status: SponsorStatusResponse | null): boolean {
+  return Boolean(status?.healthy) && status?.access?.allowed !== false;
+}
+
+/** Why Sponsored can't be used now, for the fallback prompt. */
+export function sponsorUnavailableReason(status: SponsorStatusResponse | null): string {
+  if (status?.access && !status.access.allowed && status.access.reason) return status.access.reason;
+  return status?.reason ?? "Sponsor is not healthy yet. You can pay fees yourself with tDUST.";
+}

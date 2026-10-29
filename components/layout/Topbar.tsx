@@ -32,9 +32,12 @@ import {
   SPONSORED_FEES_ENABLED,
   feeModeHelp,
   feeModeLabel,
+  sponsorUnavailableReason,
+  sponsorUsable,
   type FeeMode,
   type SponsorStatusResponse,
 } from "@/lib/fee-mode";
+import { FeeStatusBadge } from "@/components/layout/FeeStatusBadge";
 import {
   SponsorFallbackModal,
   type SponsorFallbackChoice,
@@ -610,12 +613,11 @@ export function Topbar() {
         /* keep cached */
       }
 
-      if (!status?.healthy) {
+      if (!sponsorUsable(status)) {
         if (!userDustEmpty) {
           const choice = await askSponsorFallback(
-            status?.reason ??
-              "Sponsor is not healthy yet. You can pay fees yourself with tDUST.",
-            Boolean(status?.syncing),
+            sponsorUnavailableReason(status),
+            Boolean(status?.syncing) && status?.access?.allowed !== false,
           );
           if (choice === "cancel") {
             addLog(
@@ -640,9 +642,7 @@ export function Topbar() {
           );
         } else {
           failDeploy(
-            status?.reason
-              ? `Sponsor unavailable: ${status.reason} Your tDUST is also 0. Wait for the sponsor, or fund Self-pay.`
-              : "Sponsor temporarily unavailable and your tDUST is 0; wait or retry later.",
+            `Sponsor unavailable: ${sponsorUnavailableReason(status)} Your tDUST is also 0. Wait for the sponsor, or fund Self-pay.`,
           );
           return;
         }
@@ -875,6 +875,9 @@ export function Topbar() {
       <div className="flex-1" />
 
       <div className="flex items-center gap-1.5">
+        {SPONSORED_FEES_ENABLED && network.sponsorship && user && (
+          <FeeStatusBadge feeMode={feeMode} status={sponsorStatus} />
+        )}
         <Button
           variant="default"
           size="md"
@@ -1019,6 +1022,7 @@ export function Topbar() {
                   mode === "sponsored" &&
                   Boolean(sponsorStatus) &&
                   (!sponsorStatus!.enabled ||
+                    sponsorStatus!.access?.blockedBy === "allowlist" ||
                     (!sponsorStatus!.healthy && !sponsorStatus!.syncing));
                 return (
                   <MenuItem

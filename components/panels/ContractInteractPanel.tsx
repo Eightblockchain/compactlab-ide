@@ -23,7 +23,7 @@ import {
   validateCompactParams,
 } from "@/lib/compact-values";
 import { isVoidCircuitOutput } from "@/lib/compact-runtime-format";
-import { normalizeFeeMode } from "@/lib/fee-mode";
+import { normalizeFeeMode, sponsorUnavailableReason, sponsorUsable } from "@/lib/fee-mode";
 import { NETWORKS } from "@/lib/network";
 import { useActiveNetwork, useUserSettings } from "@/lib/user-settings";
 import { explainIndexerLimit } from "@/lib/indexer-endpoints";
@@ -313,6 +313,21 @@ export function ContractInteractPanel() {
 
       const { callPlaygroundCircuit } = await import("@/lib/playground-call");
       const feeMode = normalizeFeeMode(useIDEStore.getState().feeMode);
+      const sponsorStatus = useIDEStore.getState().sponsorStatus;
+      if (feeMode === "sponsored" && network.sponsorship && sponsorStatus && !sponsorUsable(sponsorStatus)) {
+        // Don't silently switch to the user's own tDUST; let them choose Self-pay.
+        const msg = `Sponsored fees unavailable: ${sponsorUnavailableReason(sponsorStatus)} Switch to Self-pay in the ⋯ menu to call now.`;
+        addLog({
+          id: generateId(),
+          timestamp: Date.now(),
+          level: "warn",
+          message: msg,
+          source: "network",
+        });
+        setLastResult({ success: false, message: msg });
+        setCallingCircuit(null);
+        return;
+      }
       if (feeMode === "self" && lace.dustBalance?.isEmpty) {
         const msg =
           `Your tDUST balance is 0. Fund tNIGHT at ${network.faucetUrl} and wait for Dust generation.`;

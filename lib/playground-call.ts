@@ -129,7 +129,7 @@ export async function callPlaygroundCircuit(
     connectedAPI as Parameters<typeof createContractProviders>[0],
     networkConfig(network),
     assetBase,
-    { storeName: `compactlab:${slug}`, feeMode },
+    { storeName: `compactlab:${slug}`, feeMode, projectId: options?.projectId },
   );
 
   const api = new PlaygroundContractAPI(providers, slug, assetBase, {

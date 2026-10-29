@@ -76,6 +76,8 @@ export type CreateContractProvidersOptions = {
   storeName?: string;
   /** v1 default is self-pay. Sponsored uses CompactLab Dust when enabled. */
   feeMode?: FeeMode;
+  /** Sent with sponsored submits so the API can log the spend per project. */
+  projectId?: string | null;
 };
 
 /**
@@ -160,7 +162,7 @@ export async function createContractProviders(
       if (feeMode === "sponsored") {
         const res = await apiFetch("/v1/sponsor", {
           method: "POST",
-          json: { tx: hexFinalized },
+          json: { tx: hexFinalized, projectId: options.projectId ?? undefined },
         });
         const text = await res.text();
         let body: { txId?: string; error?: string; success?: boolean } = {};
