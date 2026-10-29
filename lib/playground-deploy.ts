@@ -191,7 +191,7 @@ export async function deployPlaygroundContract(
       connectedAPI as Parameters<typeof createContractProviders>[0],
       networkConfig(network),
       assetBase,
-      { storeName: `compactlab:${slug}`, feeMode },
+      { storeName: `compactlab:${slug}`, feeMode, projectId: options?.projectId },
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
