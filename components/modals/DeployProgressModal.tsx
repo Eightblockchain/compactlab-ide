@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { useEffect, useState } from "react";
 import type { DeployResult } from "@/lib/compact";
 import type { DeployStage } from "@/lib/playground-deploy";
-import { oneAmContractUrl, oneAmTxUrl } from "@/lib/explorers";
+import { contractExplorerUrl, EXPLORER_NAME, txExplorerUrl } from "@/lib/explorers";
 import { useActiveNetwork } from "@/lib/user-settings";
 
 export type DeployUiStage = "connect" | "fees" | DeployStage;
@@ -20,6 +20,8 @@ type Props = {
   onClose: () => void;
   onOpenContractUi: () => void;
   onViewLogs: () => void;
+  /** Shown on failure when the deploy can simply be run again (e.g. after the 1AM session expired). */
+  retry?: { label: string; onClick: () => void };
 };
 
 const STEPS: Array<{ id: DeployUiStage; title: string; hint: string }> = [
@@ -74,6 +76,7 @@ export function DeployProgressModal({
   onClose,
   onOpenContractUi,
   onViewLogs,
+  retry,
 }: Props) {
   const network = useActiveNetwork();
   const [now, setNow] = useState(() => Date.now());
@@ -280,16 +283,16 @@ export function DeployProgressModal({
             )}
             <div className="flex flex-wrap gap-x-4 gap-y-2 pt-0.5">
               <a
-                href={oneAmContractUrl(address)}
+                href={contractExplorerUrl(address)}
                 target="_blank"
                 rel="noreferrer"
                 className="text-xs text-accent hover:underline"
               >
-                View on 1AM explorer
+                View on {EXPLORER_NAME}
               </a>
               {txHash && (
                 <a
-                  href={oneAmTxUrl(txHash)}
+                  href={txExplorerUrl(txHash)}
                   target="_blank"
                   rel="noreferrer"
                   className="text-xs text-accent hover:underline"
@@ -330,6 +333,11 @@ export function DeployProgressModal({
               <Button variant="default" size="md" onClick={onViewLogs}>
                 View logs
               </Button>
+              {retry && (
+                <Button variant="accent" size="md" onClick={retry.onClick}>
+                  {retry.label}
+                </Button>
+              )}
             </>
           ) : (
             <>

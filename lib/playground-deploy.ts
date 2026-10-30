@@ -26,7 +26,7 @@ import {
 import { networkConfig } from "@/lib/hello-midnight/types";
 import { getActiveNetwork } from "@/lib/user-settings";
 import { explainIndexerLimit, indexerSource } from "@/lib/indexer-endpoints";
-import { oneAmContractUrl } from "@/lib/explorers";
+import { contractExplorerUrl, txExplorerUrl } from "@/lib/explorers";
 import { reportFunnelEvent } from "@/lib/funnel-events";
 import {
   isWalletSessionExpiredError,
@@ -173,13 +173,11 @@ export async function deployPlaygroundContract(
     log("info", `Using project ZK artifacts at ${assetBase}`);
   } else {
     log("info", `Using bundled ZK assets at ${assetBase}`);
-    log("warn", "IDE --skip-zk compile does not change these assets. Use Compile (ZK) to deploy your edits.");
   }
 
   stage("providers");
   log("info", `Connecting to Midnight ${network.label}…`);
   log("info", INDEXER_SOURCE_LOG[indexerSource(network)](network.label));
-  log("info", "ZK proving will run in the 1AM wallet (no local Docker proof server).");
 
   const { createContractProviders, PlaygroundContractAPI } = await import(
     "@/lib/contract-runtime"
@@ -199,7 +197,7 @@ export async function deployPlaygroundContract(
       log("warn", WALLET_SESSION_EXPIRED_MSG);
       log(
         "warn",
-        "Deploy paused for reconnect. Click Reconnect 1AM in the toolbar, then Deploy again.",
+        "Deploy paused. Click Reconnect and deploy again; your inputs are kept.",
       );
       return {
         success: false,
@@ -268,7 +266,7 @@ export async function deployPlaygroundContract(
       log("warn", WALLET_SESSION_EXPIRED_MSG);
       log(
         "warn",
-        "Deploy paused for reconnect. Click Reconnect 1AM in the toolbar, then Deploy again.",
+        "Deploy paused. Click Reconnect and deploy again; your inputs are kept.",
       );
       return {
         success: false,
@@ -310,17 +308,10 @@ export async function deployPlaygroundContract(
   const duration = Date.now() - t0;
   log("success", `Contract deployed in ${(duration / 1000).toFixed(1)}s`);
   log("success", `Address: ${contractAddress}`);
-    log(
-      "info",
-      `View contract: ${oneAmContractUrl(contractAddress, network.id)}`,
-    );
-    if (transactionHash) {
-      log("info", `Tx hash: ${transactionHash}`);
-    }
-    log(
-      "warn",
-      "Click View contract in Network / Contract UI, or open the 1AM link above. Compact ids are hex, not Subscan accounts.",
-    );
+  log("info", `View contract: ${contractExplorerUrl(contractAddress, network.id)}`);
+  if (transactionHash) {
+    log("info", `View transaction: ${txExplorerUrl(transactionHash, network.id)}`);
+  }
 
   reportFunnelEvent("deploy_ok", {
     projectId: options?.projectId ?? undefined,

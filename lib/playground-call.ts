@@ -16,6 +16,7 @@ import { networkConfig } from "@/lib/hello-midnight/types";
 import { getActiveNetwork } from "@/lib/user-settings";
 import { explainIndexerLimit } from "@/lib/indexer-endpoints";
 import { reportFunnelEvent } from "@/lib/funnel-events";
+import { txExplorerUrl } from "@/lib/explorers";
 
 function log(addLog: (l: LogEntry) => void, level: LogEntry["level"], message: string) {
   addLog({ id: generateId(), timestamp: Date.now(), level, message, source: "network" });
@@ -119,7 +120,6 @@ export async function callPlaygroundCircuit(
   });
 
   log(addLog, "info", `Joining contract ${contractAddress.slice(0, 16)}… (${slug} @ ${assetBase})`);
-  log(addLog, "info", "ZK proving via 1AM wallet (no Docker proof server).");
 
   const { createContractProviders, PlaygroundContractAPI } = await import(
     "@/lib/contract-runtime"
@@ -143,7 +143,7 @@ export async function callPlaygroundCircuit(
   log(addLog, "info", `Calling ${circuitName}(…)…`);
   log(addLog, "info", "ZK proof generation may take 1 to 2 minutes inside 1AM.");
   if (feeMode === "self") {
-    log(addLog, "warn", "Approve the transaction fee in 1AM when prompted.");
+    log(addLog, "info", "Approve the transaction fee in 1AM when prompted.");
   } else {
     log(addLog, "info", "Approve proving in 1AM when prompted. Network fees are sponsored by CompactLab.");
   }
@@ -153,7 +153,13 @@ export async function callPlaygroundCircuit(
     const duration = Date.now() - t0;
     log(addLog, "success", `${circuitName} confirmed in ${(duration / 1000).toFixed(1)}s`);
     if (txResult.status) log(addLog, "info", `Tx status: ${txResult.status}`);
-    log(addLog, "success", txResult.txHash ? `Tx hash: ${txResult.txHash}` : `Tx ID: ${txResult.txId}`);
+    log(
+      addLog,
+      "success",
+      txResult.txHash
+        ? `View transaction: ${txExplorerUrl(txResult.txHash, network.id)}`
+        : `Tx ID: ${txResult.txId}`,
+    );
     if (txResult.returnValue && txResult.returnValue !== "[]") {
       log(addLog, "info", `Circuit return: ${txResult.returnValue}`);
     }
@@ -174,7 +180,7 @@ export async function callPlaygroundCircuit(
       log(
         addLog,
         "warn",
-        "Call paused for reconnect. Click Reconnect 1AM in the toolbar, then try the circuit again.",
+        "Call paused. Run the circuit again to reconnect 1AM; your inputs are kept.",
       );
       throw new Error(WALLET_SESSION_EXPIRED_MSG);
     }

@@ -13,7 +13,7 @@ import {
 } from "@/hooks/useLaceWallet";
 import { getDeployGate, getLiveCompactSource } from "@/lib/deploy-gate";
 import { isOutdatedManagedArtifactUrl, OUTDATED_ARTIFACT_MESSAGE } from "@/lib/playground-assets";
-import { oneAmContractUrl, oneAmTxUrl } from "@/lib/explorers";
+import { contractExplorerUrl, txExplorerUrl } from "@/lib/explorers";
 import {
   validateWitnessValues,
   witnessSpecsForNames,
@@ -292,30 +292,21 @@ export function ContractInteractPanel() {
     setBottomPanelOpen(true);
 
     try {
-      if (!lace.connectedAPI) {
+      let liveApi = lace.connectedAPI ? await lace.ensureSession() : null;
+      if (!liveApi) {
+        // Not connected yet, or the 1AM session expired: (re)connect as part of this click.
         addLog({
           id: generateId(),
           timestamp: Date.now(),
           level: "info",
-          message: "Connecting to 1AM wallet…",
+          message: lace.connectedAPI ? "1AM session expired. Reconnecting…" : "Connecting to 1AM wallet…",
           source: "network",
         });
+        liveApi = await lace.connect();
       }
-      const wasConnected = !!lace.connectedAPI;
-      const liveApi = wasConnected ? await lace.ensureSession() : await lace.connect();
       if (!liveApi) {
-        const msg = !wasConnected
-          ? `Could not connect 1AM. Install it from https://1am.xyz/, unlock it on ${network.label}, approve this site, then try again.`
-          : lace.error && isWalletSessionExpiredMessage(lace.error)
-            ? lace.error
-            : WALLET_SESSION_EXPIRED_MSG;
-        addLog({
-          id: generateId(),
-          timestamp: Date.now(),
-          level: "warn",
-          message: wasConnected ? `${msg} Reconnect 1AM, then try the circuit again.` : msg,
-          source: "network",
-        });
+        const msg = `Could not connect 1AM. Install it from https://1am.xyz/, unlock it on ${network.label}, approve this site, then try again.`;
+        addLog({ id: generateId(), timestamp: Date.now(), level: "warn", message: msg, source: "network" });
         setLastResult({ success: false, message: msg });
         setCallingCircuit(null);
         return;
@@ -328,7 +319,7 @@ export function ContractInteractPanel() {
         : "self";
       if (feeMode === "sponsored" && network.sponsorship && sponsorStatus && !sponsorUsable(sponsorStatus)) {
         // Don't silently switch to the user's own tDUST; let them choose Self-pay.
-        const msg = `Sponsored fees unavailable: ${sponsorUnavailableReason(sponsorStatus)} Switch to Self-pay in the ⋯ menu to call now.`;
+        const msg = `Sponsored fees unavailable: ${sponsorUnavailableReason(sponsorStatus)} Click the fee badge in the toolbar to switch to Self-pay and call now.`;
         addLog({
           id: generateId(),
           timestamp: Date.now(),
@@ -390,7 +381,7 @@ export function ContractInteractPanel() {
         lace.markSessionExpired(WALLET_SESSION_EXPIRED_MSG);
         setLastResult({
           success: false,
-          message: "1AM connection expired. Reconnect, then try again.",
+          message: "1AM connection expired. Run the circuit again to reconnect; your inputs are kept.",
         });
       } else {
         setLastResult({ success: false, message: msg });
@@ -507,7 +498,7 @@ export function ContractInteractPanel() {
               On-chain contract
             </p>
             <a
-              href={oneAmContractUrl(activeAddress)}
+              href={contractExplorerUrl(activeAddress)}
               target="_blank"
               rel="noreferrer"
               className="mt-0.5 block text-xs font-mono text-accent hover:underline truncate"
@@ -609,7 +600,7 @@ export function ContractInteractPanel() {
         )}
         {lastTx?.hash && (
           <a
-            href={oneAmTxUrl(lastTx.hash)}
+            href={txExplorerUrl(lastTx.hash)}
             target="_blank"
             rel="noreferrer"
             className="block text-2xs text-text-muted hover:text-accent truncate"
@@ -775,7 +766,8 @@ function CallResultCard({
   outputType?: string;
   ledger: Record<string, string> | null;
 }) {
-  const explorer = result.txHash || result.txId;
+  // Explorers index the tx hash; the tx id alone has no explorer page.
+  const explorer = result.txHash;
   const voidOut = isVoidCircuitOutput(outputType);
   const showReturn =
     result.success &&
@@ -813,7 +805,7 @@ function CallResultCard({
       )}
       {explorer && (
         <a
-          href={oneAmTxUrl(explorer)}
+          href={txExplorerUrl(explorer)}
           target="_blank"
           rel="noreferrer"
           className="text-2xs font-mono text-accent hover:underline break-all"
