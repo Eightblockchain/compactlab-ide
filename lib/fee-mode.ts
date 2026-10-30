@@ -59,11 +59,16 @@ export type SponsorStatusResponse = {
 
 export type SponsorAccess = {
   allowed: boolean;
-  blockedBy: "allowlist" | "daily_limit" | null;
+  blockedBy: "unverified" | "allowlist" | "waitlist" | "daily_limit" | null;
   reason: string | null;
   dailyLimit: number;
   remainingToday: number;
+  /** Beta invite membership, when the user joined through an invite link. */
+  beta?: import("@/lib/api").BetaMembership | null;
 };
+
+/** Limits that make Sponsored unavailable until something changes on the server side. */
+const NOT_OFFERED = new Set<SponsorAccess["blockedBy"]>(["allowlist", "waitlist", "unverified"]);
 
 /** Sponsored fees can pay for this user's next transaction right now. */
 export function sponsorUsable(status: SponsorStatusResponse | null): boolean {
@@ -71,11 +76,12 @@ export function sponsorUsable(status: SponsorStatusResponse | null): boolean {
 }
 
 /**
- * Sponsored is worth offering to this user at all: the server has it on and
- * the user is invited. While status is still loading, assume yes.
+ * Sponsored is worth offering to this user at all: the server has it on, the
+ * user is invited (and not waitlisted) and their email is confirmed. While
+ * status is still loading, assume yes.
  */
 export function sponsorOffered(status: SponsorStatusResponse | null): boolean {
-  return !status || (status.enabled && status.access?.blockedBy !== "allowlist");
+  return !status || (status.enabled && !NOT_OFFERED.has(status.access?.blockedBy ?? null));
 }
 
 /** The mode a Deploy or Call actually uses: Self-pay when Sponsored isn't offered. */

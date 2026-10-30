@@ -19,6 +19,7 @@ import { InspectorPanel } from "@/components/panels/InspectorPanel";
 import { BottomPanel } from "@/components/panels/BottomPanel";
 import { NewProjectModal } from "@/components/modals/NewProjectModal";
 import { WorkSafety } from "@/components/layout/WorkSafety";
+import { BetaWelcome } from "@/components/modals/BetaWelcomeModal";
 
 export default function PlaygroundPage() {
   return (
@@ -177,6 +178,7 @@ function Playground() {
       {/* Global modal layer */}
       <NewProjectModal />
       <HelpDrawer />
+      <BetaWelcome />
     </div>
   );
 }

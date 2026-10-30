@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useIDEStore } from "@/store/ide";
+import { useAuth } from "@/hooks/useAuth";
 import { Badge, Button, StatusDot } from "@/components/ui";
 import { extractCircuits, extractLedgerVars, extractWitnesses } from "@/lib/compact";
 import { circuitWitnessUsage } from "@/lib/compact-constructor";
@@ -76,6 +77,7 @@ export function ContractInteractPanel() {
     saveContractAddress,
   } = useIDEStore();
   const lace = useLaceWallet();
+  const { user } = useAuth();
 
   const liveCompact = useMemo(
     () =>
@@ -225,10 +227,13 @@ export function ContractInteractPanel() {
     currentSource: liveCompact,
   });
   // 1AM connects on click, like Deploy; it isn't needed in advance.
-  const canCallOnChain = !!activeAddress && deployGate.canDeploy && !witnessErr;
+  const emailUnconfirmed = user?.emailVerified === false;
+  const canCallOnChain = !!activeAddress && deployGate.canDeploy && !witnessErr && !emailUnconfirmed;
 
   const callBlockedReason = !activeAddress
     ? "Deploy from the toolbar to get a contract address."
+    : emailUnconfirmed
+      ? "Confirm your email to call circuits. Check your inbox for the link."
     : !deployGate.canDeploy
       ? deployGate.reason
       : witnessErr

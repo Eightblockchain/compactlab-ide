@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { API_BASE } from "@/lib/api";
+import { API_BASE, createBrowserApi } from "@/lib/api";
+import { useAuth } from "@/hooks/useAuth";
 import { useLaceWallet } from "@/hooks/useLaceWallet";
 import { MIDNIGHT_WALLET_LINKS } from "@/lib/wallet-links";
 import { useIDEStore } from "@/store/ide";
@@ -17,7 +18,7 @@ import { formatClock, formatDuration } from "@/components/layout/MaintenanceScre
  * One slim bar under the Topbar. Replaces the separate public-mode,
  * announcement, workspace and onboarding banners: it shows the single most
  * important message, highest priority first:
- *   outage → indexer allowance → workspace sync → announcements → server limits → next step.
+ *   outage → unconfirmed email → indexer allowance → workspace sync → announcements → server limits → next step.
  */
 
 type Tone = "critical" | "warning" | "info" | "guide";
@@ -39,6 +40,17 @@ const INDEXER_STATUS_POLL_MS = 5 * 60 * 1000;
 
 export function NoticeBar() {
   const wallet = useLaceWallet();
+  const { user, refresh } = useAuth();
+  const unverifiedEmail = user && user.emailVerified === false ? user.email : null;
+  const [resend, setResend] = useState<"idle" | "sending" | "sent" | { error: string }>("idle");
+
+  // Pick up a confirmation made in another tab (the email link) when the user comes back.
+  useEffect(() => {
+    if (!unverifiedEmail) return;
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [unverifiedEmail, refresh]);
   const {
     activeProject,
     activeFileId,
@@ -152,6 +164,37 @@ export function NoticeBar() {
         content: "The CompactLab API is not responding. Cloud save and Compile may fail until it recovers.",
       });
     }
+    if (unverifiedEmail) {
+      const sendAgain = () => {
+        setResend("sending");
+        createBrowserApi()
+          .resendVerification()
+          .then((r) => (r.alreadyVerified ? void refresh() : setResend("sent")))
+          .catch((e) => setResend({ error: e instanceof Error ? e.message : "Could not send" }));
+      };
+      out.push({
+        id: "email-unverified",
+        tone: "warning",
+        content: (
+          <>
+            Confirm your email to deploy and call. We sent a link to{" "}
+            <span className="mx-1 font-medium">{unverifiedEmail}</span>
+            {resend === "sent" ? (
+              <span className="ml-1 text-text-muted">New link sent. Check spam too.</span>
+            ) : resend === "sending" ? (
+              <span className="ml-1 text-text-muted">Sending…</span>
+            ) : (
+              <>
+                {typeof resend === "object" && <span className="ml-1 text-error">{resend.error}</span>}
+                <span className="ml-2">
+                  <InlineAction onClick={sendAgain}>Resend email</InlineAction>
+                </span>
+              </>
+            )}
+          </>
+        ),
+      });
+    }
     if (usesSharedIndexer && indexerStatus && !indexerStatus.ok) {
       out.push({
         id: "indexer-limit",
@@ -206,6 +249,9 @@ export function NoticeBar() {
     planned,
     toneTick,
     health,
+    unverifiedEmail,
+    resend,
+    refresh,
     usesSharedIndexer,
     indexerStatus,
     setNetwork,

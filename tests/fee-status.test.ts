@@ -99,3 +99,30 @@ describe("sponsorOffered", () => {
     ).toBe(true);
   });
 });
+
+describe("beta access states", () => {
+  const blocked = (blockedBy: "unverified" | "waitlist", beta?: { waitlistPosition: number }) => ({
+    ...healthy,
+    access: {
+      allowed: false,
+      blockedBy,
+      reason: "why",
+      dailyLimit: 20,
+      remainingToday: 0,
+      beta: beta
+        ? { inviteCode: "b", inviteName: "Beta", state: "waitlist" as const, seats: 10, seatsTaken: 10, joinedAt: "", ...beta }
+        : null,
+    },
+  });
+
+  it("asks to confirm the email first", () => {
+    expect(feeStatusView("sponsored", blocked("unverified")).label).toBe("Fees: confirm email");
+    expect(sponsorOffered(blocked("unverified"))).toBe(false);
+  });
+
+  it("shows the waitlist place and hides the Sponsored choice", () => {
+    const status = blocked("waitlist", { waitlistPosition: 3 });
+    expect(feeStatusView("sponsored", status).label).toBe("Beta waitlist #3");
+    expect(sponsorOffered(status)).toBe(false);
+  });
+});
