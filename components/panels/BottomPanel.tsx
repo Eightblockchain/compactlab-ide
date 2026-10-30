@@ -7,7 +7,7 @@ import { cn, formatTimestamp } from "@/lib/utils";
 import type { LogEntry } from "@/lib/compact";
 import type { LogTab } from "@/store/ide";
 import { compactEditorBridge } from "@/lib/compact-editor-bridge";
-import { oneAmContractUrl, oneAmTxUrl } from "@/lib/explorers";
+import { contractExplorerUrl, EXPLORER_NAME, txExplorerUrl } from "@/lib/explorers";
 import { lintCompactSource } from "@/lib/compact-lint";
 import { useLaceWallet } from "@/hooks/useLaceWallet";
 import { ZkArtifactsPanel } from "@/components/panels/ZkArtifactsPanel";
@@ -142,9 +142,33 @@ function LogLine({ log }: { log: LogEntry }) {
       </span>
       <span>
         <span className="opacity-60">{prefixes[log.level]}</span>
-        {log.message}
+        <LinkifiedText text={log.message} />
       </span>
     </div>
+  );
+}
+
+/** Render http(s) URLs in a log line as links (explorer, faucet, 1AM). */
+function LinkifiedText({ text }: { text: string }) {
+  const parts = text.split(/(https?:\/\/[^\s)]*[^\s).,;:])/g);
+  return (
+    <>
+      {parts.map((part, i) =>
+        i % 2 === 1 ? (
+          <a
+            key={i}
+            href={part}
+            target="_blank"
+            rel="noreferrer"
+            className="underline decoration-dotted underline-offset-2 hover:text-accent break-all"
+          >
+            {part}
+          </a>
+        ) : (
+          part
+        ),
+      )}
+    </>
   );
 }
 
@@ -530,11 +554,11 @@ function NetworkPanel() {
                 <p className="text-2xs text-text-muted mb-1">Contract Address</p>
                 <div className="flex items-center gap-2">
                   <a
-                    href={oneAmContractUrl(deployResult.contractAddress, deployedOn.id)}
+                    href={contractExplorerUrl(deployResult.contractAddress, deployedOn.id)}
                     target="_blank"
                     rel="noreferrer"
                     className="text-xs font-mono text-success break-all flex-1 hover:underline"
-                    title={`View contract on 1AM Explorer (${deployedOn.label})`}
+                    title={`View contract on ${EXPLORER_NAME} (${deployedOn.label})`}
                   >
                     {deployResult.contractAddress}
                   </a>
@@ -551,7 +575,7 @@ function NetworkPanel() {
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <a
-                    href={oneAmContractUrl(deployResult.contractAddress, deployedOn.id)}
+                    href={contractExplorerUrl(deployResult.contractAddress, deployedOn.id)}
                     target="_blank"
                     rel="noreferrer"
                     className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium text-white bg-accent hover:opacity-90 transition-opacity"
@@ -563,7 +587,7 @@ function NetworkPanel() {
                   </a>
                   {deployResult.transactionHash && (
                     <a
-                      href={oneAmTxUrl(deployResult.transactionHash, deployedOn.id)}
+                      href={txExplorerUrl(deployResult.transactionHash, deployedOn.id)}
                       target="_blank"
                       rel="noreferrer"
                       className="text-2xs text-accent hover:underline"
@@ -573,7 +597,7 @@ function NetworkPanel() {
                   )}
                 </div>
                 <p className="text-2xs text-text-dim mt-1.5">
-                  Opens 1AM {deployedOn.label} explorer. Compact contracts are hex ids, not wallet accounts.
+                  Opens {EXPLORER_NAME} ({deployedOn.label}).
                 </p>
               </div>
             )}
@@ -582,7 +606,7 @@ function NetworkPanel() {
               <div>
                 <p className="text-2xs text-text-muted mb-1">Transaction Hash</p>
                 <a
-                  href={oneAmTxUrl(deployResult.transactionHash, deployedOn.id)}
+                  href={txExplorerUrl(deployResult.transactionHash, deployedOn.id)}
                   target="_blank"
                   rel="noreferrer"
                   className="text-2xs font-mono text-text-secondary break-all hover:text-accent hover:underline"

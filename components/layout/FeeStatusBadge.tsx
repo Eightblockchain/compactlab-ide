@@ -1,11 +1,13 @@
 "use client";
 
 import { Badge } from "@/components/ui";
-import type { FeeMode, SponsorStatusResponse } from "@/lib/fee-mode";
+import { feeModeLabel, type FeeMode, type SponsorStatusResponse } from "@/lib/fee-mode";
 
 type Props = {
   feeMode: FeeMode;
   status: SponsorStatusResponse | null;
+  /** When set, clicking the badge switches to this fee mode. */
+  switchTo?: { mode: FeeMode; onSwitch: () => void };
 };
 
 type View = {
@@ -14,8 +16,7 @@ type View = {
   title: string;
 };
 
-const SPONSORED_HELP =
-  "CompactLab pays the network fee (tDUST). You still prove and sign in 1AM. Switch fee mode in the ⋯ menu.";
+const SPONSORED_HELP = "CompactLab pays the network fee (tDUST). You still prove and sign in 1AM.";
 
 /** What the Topbar says about fees for this user right now. */
 export function feeStatusView(feeMode: FeeMode, status: SponsorStatusResponse | null): View {
@@ -23,7 +24,7 @@ export function feeStatusView(feeMode: FeeMode, status: SponsorStatusResponse | 
     return {
       label: "Fees: self-pay",
       variant: "muted",
-      title: "You pay network fees from your own tDUST in 1AM. Switch to Sponsored in the ⋯ menu.",
+      title: "You pay network fees from your own tDUST in 1AM.",
     };
   }
   if (!status) {
@@ -76,13 +77,28 @@ export function feeStatusView(feeMode: FeeMode, status: SponsorStatusResponse | 
   };
 }
 
-export function FeeStatusBadge({ feeMode, status }: Props) {
+export function FeeStatusBadge({ feeMode, status, switchTo }: Props) {
   const view = feeStatusView(feeMode, status);
+  const badge = (
+    <Badge variant={view.variant} size="md" dot>
+      {view.label}
+    </Badge>
+  );
+  if (!switchTo) {
+    return (
+      <span title={view.title} className="cursor-default">
+        {badge}
+      </span>
+    );
+  }
   return (
-    <span title={view.title} className="cursor-default">
-      <Badge variant={view.variant} size="md" dot>
-        {view.label}
-      </Badge>
-    </span>
+    <button
+      type="button"
+      onClick={switchTo.onSwitch}
+      title={`${view.title} Click to switch to ${feeModeLabel(switchTo.mode)}.`}
+      className="rounded-full hover:opacity-80 transition-opacity focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+    >
+      {badge}
+    </button>
   );
 }

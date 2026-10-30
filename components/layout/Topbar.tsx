@@ -495,30 +495,19 @@ export function Topbar() {
       addLog(
         makeLog(
           "info",
-          "Deploying with your last Compile (ZK) artifacts. CompactLab requires the 1AM wallet (https://1am.xyz/).",
+          "Deploying with your last Compile (ZK) artifacts.",
           "network",
         ),
       );
     }
 
     setDeployStage("connect");
-    let connectedAPI = lace.connectedAPI;
-    if (connectedAPI) {
-      connectedAPI = await lace.ensureSession();
-      if (!connectedAPI) {
-        addLog(
-          makeLog(
-            "warn",
-            "1AM session expired. Reconnect, then Deploy again — your setup inputs are unchanged.",
-            "network",
-          ),
-        );
-        setDeployModalOpen(false);
-        setStatus("idle");
-        return;
-      }
-    } else {
-      addLog(makeLog("info", "Connecting to 1AM wallet…", "network"));
+    let connectedAPI = lace.connectedAPI ? await lace.ensureSession() : null;
+    if (!connectedAPI) {
+      // Not connected yet, or the 1AM session expired: (re)connect as part of this click.
+      addLog(
+        makeLog("info", lace.connectedAPI ? "1AM session expired. Reconnecting…" : "Connecting to 1AM wallet…", "network"),
+      );
       connectedAPI = await lace.connect();
       if (!connectedAPI) {
         failDeploy(
@@ -672,15 +661,8 @@ export function Topbar() {
       lace.markSessionExpired(WALLET_SESSION_EXPIRED_MSG);
       outcome = {
         ...outcome,
-        error: "1AM connection expired. Reconnect, then click Deploy again.",
+        error: "1AM connection expired during Deploy. Click Reconnect and deploy again; your inputs are kept.",
       };
-      addLog(
-        makeLog(
-          "warn",
-          "Deploy paused: 1AM session expired. Reconnect from the toolbar, then Deploy again.",
-          "network",
-        ),
-      );
     }
 
     setDeployResult(outcome);
@@ -739,6 +721,14 @@ export function Topbar() {
     lace.walletInfo?.unshieldedAddress
       ? `${lace.walletInfo.unshieldedAddress.slice(0, 6)}…${lace.walletInfo.unshieldedAddress.slice(-4)}`
       : "1AM";
+
+  // Sponsored can't be picked while the sponsor is down (but can while it is starting).
+  const sponsorDown = Boolean(sponsorStatus) && !sponsorStatus!.healthy && !sponsorStatus!.syncing;
+
+  const selectFeeMode = (mode: FeeMode) => {
+    setFeeMode(mode);
+    addLog(makeLog("info", `Fee mode set to ${feeModeLabel(mode)}. ${feeModeHelp(mode)}`, "network"));
+  };
 
   const handleWalletClick = async () => {
     if (walletConnected) {
@@ -836,7 +826,18 @@ export function Topbar() {
 
       <div className="flex items-center gap-1.5">
         {SPONSORED_FEES_ENABLED && network.sponsorship && user && (
-          <FeeStatusBadge feeMode={feeMode} status={sponsorStatus} />
+          <FeeStatusBadge
+            feeMode={feeMode}
+            status={sponsorStatus}
+            switchTo={
+              sponsorOffered(sponsorStatus) && !isRunning && (feeMode === "sponsored" || !sponsorDown)
+                ? {
+                    mode: feeMode === "sponsored" ? "self" : "sponsored",
+                    onSwitch: () => selectFeeMode(feeMode === "sponsored" ? "self" : "sponsored"),
+                  }
+                : undefined
+            }
+          />
         )}
         <Button
           variant="default"
@@ -978,26 +979,13 @@ export function Topbar() {
               <MenuSeparator />
               <MenuLabel>Network fees</MenuLabel>
               {(["sponsored", "self"] as FeeMode[]).map((mode) => {
-                const sponsoredUnavailable =
-                  mode === "sponsored" &&
-                  Boolean(sponsorStatus) &&
-                  !sponsorStatus!.healthy &&
-                  !sponsorStatus!.syncing;
+                const sponsoredUnavailable = mode === "sponsored" && sponsorDown;
                 return (
                   <MenuItem
                     key={mode}
                     checked={feeMode === mode}
                     disabled={isRunning || sponsoredUnavailable}
-                    onSelect={() => {
-                      setFeeMode(mode);
-                      addLog(
-                        makeLog(
-                          "info",
-                          `Fee mode set to ${feeModeLabel(mode)}. ${feeModeHelp(mode)}`,
-                          "network",
-                        ),
-                      );
-                    }}
+                    onSelect={() => selectFeeMode(mode)}
                   >
                     {feeModeLabel(mode)}
                   </MenuItem>
@@ -1077,6 +1065,17 @@ export function Topbar() {
         setBottomPanelOpen(true);
         setDeployModalOpen(false);
       }}
+      retry={
+        deployResult && !deployResult.success && isWalletSessionExpiredMessage(deployResult.error ?? "")
+          ? {
+              label: "Reconnect and deploy again",
+              onClick: () => {
+                setDeployModalOpen(false);
+                void handleDeploy();
+              },
+            }
+          : undefined
+      }
     />
     </>
   );

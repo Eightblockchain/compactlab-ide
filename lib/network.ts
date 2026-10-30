@@ -23,7 +23,8 @@ export type NetworkInfo = {
   publicIndexer: { http: string; ws: string } | null;
   /** CompactLab's fee sponsor runs on Preprod only. */
   sponsorship: boolean;
-  explorers: { oneAm: string; midnightExplorer: string | null; subscan: string | null };
+  /** Midnight Explorer base URL (contracts and transactions by hash). */
+  explorer: string;
 };
 
 export const NETWORKS: Record<PlaygroundNetwork, NetworkInfo> = {
@@ -34,11 +35,7 @@ export const NETWORKS: Record<PlaygroundNetwork, NetworkInfo> = {
     faucetUrl: "https://faucet.preprod.midnight.network/",
     publicIndexer: null,
     sponsorship: true,
-    explorers: {
-      oneAm: "https://explorer.1am.xyz",
-      midnightExplorer: "https://preprod.midnightexplorer.com",
-      subscan: "https://midnight-preprod.subscan.io",
-    },
+    explorer: "https://preprod.midnightexplorer.com",
   },
   preview: {
     id: "preview",
@@ -50,7 +47,7 @@ export const NETWORKS: Record<PlaygroundNetwork, NetworkInfo> = {
       ws: "wss://indexer.preview.midnight.network/api/v4/graphql/ws",
     },
     sponsorship: false,
-    explorers: { oneAm: "https://explorer.1am.xyz", midnightExplorer: null, subscan: null },
+    explorer: "https://preview.midnightexplorer.com",
   },
 };
 
