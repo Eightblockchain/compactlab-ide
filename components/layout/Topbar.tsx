@@ -711,7 +711,8 @@ export function Topbar() {
     currentSource: liveSource,
   });
   const compileAllowed = entitlements?.compileAllowed !== false;
-  const deployEnabled = !isRunning && !!activeProject && deployGate.canDeploy;
+  const emailUnconfirmed = user?.emailVerified === false;
+  const deployEnabled = !isRunning && !!activeProject && deployGate.canDeploy && !emailUnconfirmed;
   const walletConnected = lace.status === "connected" && !!lace.connectedAPI;
   const needsReconnect =
     !walletConnected &&
@@ -926,7 +927,9 @@ export function Topbar() {
           title={
             !activeProject
               ? "Create or open a project first"
-              : deployGate.canDeploy
+              : emailUnconfirmed
+                ? `Confirm your email to deploy. We sent a link to ${user?.email}.`
+                : deployGate.canDeploy
                 ? `${deployGate.reason} Requires 1AM.`
                 : deployGate.reason
           }

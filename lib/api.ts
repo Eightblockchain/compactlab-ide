@@ -13,6 +13,29 @@ export type UserPublic = {
   createdAt: string;
   planSlug: PlanSlug;
   hasPassword?: boolean;
+  /** Email confirmed. Unconfirmed accounts can look around but not deploy or call. */
+  emailVerified?: boolean;
+};
+
+export type BetaState = "seat" | "open" | "approved" | "waitlist" | "removed";
+
+export type BetaMembership = {
+  inviteCode: string;
+  inviteName: string;
+  state: BetaState;
+  seats: number;
+  seatsTaken: number;
+  waitlistPosition: number | null;
+  joinedAt: string;
+};
+
+export type PublicInvite = {
+  code: string;
+  name: string;
+  active: boolean;
+  seats: number;
+  seatsTaken: number;
+  full: boolean;
 };
 
 export type Entitlements = {
@@ -95,8 +118,8 @@ async function request<T>(
 
 export function createBrowserApi() {
   return {
-    signup: (body: { email: string; password: string; name?: string }) =>
-      request<{ user: UserPublic; token: string; entitlements: Entitlements }>(
+    signup: (body: { email: string; password: string; name?: string; turnstileToken?: string }) =>
+      request<{ user: UserPublic; token: string; entitlements: Entitlements; emailSent?: boolean }>(
         "/v1/auth/signup",
         { method: "POST", json: body },
       ),
@@ -106,6 +129,14 @@ export function createBrowserApi() {
         { method: "POST", json: body },
       ),
     logout: () => request<{ ok: true }>("/v1/auth/logout", { method: "POST" }),
+    verifyEmail: (token: string) =>
+      request<{ ok: true }>("/v1/auth/verify-email", { method: "POST", json: { token } }),
+    resendVerification: () =>
+      request<{ ok: true; alreadyVerified: boolean }>("/v1/auth/verify-email/resend", { method: "POST" }),
+    getInvite: (code: string) =>
+      request<{ invite: PublicInvite }>(`/v1/beta/invites/${encodeURIComponent(code)}`),
+    joinBeta: (code: string) =>
+      request<{ membership: BetaMembership }>("/v1/beta/join", { method: "POST", json: { code } }),
     me: () =>
       request<{ user: UserPublic; entitlements: Entitlements }>("/v1/me"),
     updateMe: (body: { name?: string | null }) =>

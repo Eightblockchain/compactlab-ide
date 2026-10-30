@@ -31,6 +31,21 @@ export function feeStatusView(feeMode: FeeMode, status: SponsorStatusResponse | 
     return { label: "Fees: checking…", variant: "muted", title: "Checking CompactLab's fee sponsor…" };
   }
   const access = status.access;
+  if (access?.blockedBy === "unverified") {
+    return {
+      label: "Fees: confirm email",
+      variant: "warning",
+      title: access.reason ?? "Confirm your email to deploy with sponsored fees.",
+    };
+  }
+  if (access?.blockedBy === "waitlist") {
+    const place = access.beta?.waitlistPosition;
+    return {
+      label: place ? `Beta waitlist #${place}` : "Beta waitlist",
+      variant: "warning",
+      title: access.reason ?? "Every sponsored beta seat is taken. Use Self-pay meanwhile.",
+    };
+  }
   if (access?.blockedBy === "allowlist") {
     return {
       label: "Fees: self-pay",
