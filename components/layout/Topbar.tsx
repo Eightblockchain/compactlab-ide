@@ -25,19 +25,20 @@ import { deployPlaygroundContract } from "@/lib/playground-deploy";
 import { getDeployGate, getLiveCompactSource } from "@/lib/deploy-gate";
 import { exportProjectZip, downloadBlob } from "@/lib/project-export";
 import type { UserPublic, Entitlements } from "@/lib/api";
-import { apiFetch } from "@/lib/api";
 import { BILLING_ENABLED } from "@/lib/billing";
 import { onOpenSettingsRequest, useActiveNetwork } from "@/lib/user-settings";
 import {
   SPONSORED_FEES_ENABLED,
+  effectiveFeeMode,
   feeModeHelp,
   feeModeLabel,
+  sponsorOffered,
   sponsorUnavailableReason,
   sponsorUsable,
   type FeeMode,
-  type SponsorStatusResponse,
 } from "@/lib/fee-mode";
 import { FeeStatusBadge } from "@/components/layout/FeeStatusBadge";
+import { fetchSponsorStatus, refreshSponsorStatus } from "@/lib/sponsor-status";
 import {
   SponsorFallbackModal,
   type SponsorFallbackChoice,
@@ -172,52 +173,8 @@ export function Topbar() {
     }
     let cancelled = false;
     const refresh = async () => {
-      try {
-        const res = await apiFetch("/v1/sponsor/status");
-        const text = await res.text();
-        let body: SponsorStatusResponse | { error?: string } = {
-          enabled: false,
-          healthy: false,
-          configured: false,
-          dustBalance: null,
-          dustCap: null,
-          reason: "Could not reach sponsor status",
-        };
-        try {
-          body = text
-            ? (JSON.parse(text) as SponsorStatusResponse)
-            : body;
-        } catch {
-          /* keep fallback */
-        }
-        if (cancelled) return;
-        if (!res.ok) {
-          setSponsorStatus({
-            enabled: false,
-            healthy: false,
-            configured: false,
-            dustBalance: null,
-            dustCap: null,
-            reason:
-              (body as { error?: string }).error ||
-              `Sponsor status ${res.status}`,
-          });
-          return;
-        }
-        const status = body as SponsorStatusResponse;
-        setSponsorStatus(status);
-      } catch (err) {
-        if (!cancelled) {
-          setSponsorStatus({
-            enabled: false,
-            healthy: false,
-            configured: false,
-            dustBalance: null,
-            dustCap: null,
-            reason: err instanceof Error ? err.message : String(err),
-          });
-        }
-      }
+      const status = await fetchSponsorStatus();
+      if (!cancelled) setSponsorStatus(status);
     };
     void refresh();
     const id = window.setInterval(() => void refresh(), 60_000);
@@ -574,47 +531,39 @@ export function Topbar() {
     }
 
     setDeployStage("fees");
-    addLog(makeLog("info", "Checking tDUST balance before Deploy…", "network"));
-    let userDustEmpty = false;
-    try {
-      const dust = await lace.refreshDustBalance();
-      if (dust) {
-        addLog(
-          makeLog(
-            "info",
-            `tDUST balance: ${dust.balanceLabel} (cap ${dust.capLabel})`,
-            "network",
-          ),
-        );
-        userDustEmpty = dust.isEmpty;
-      }
-    } catch {
-      /* balance probe is best-effort; Deploy still proceeds if 1AM cannot report it */
-    }
-
-    // CompactLab's fee sponsor runs on Preprod only.
-    let deployFeeMode = SPONSORED_FEES_ENABLED && network.sponsorship ? feeMode : "self";
-    if (deployFeeMode === "self" && userDustEmpty) {
-      failDeploy(
-        `Your tDUST balance is 0. Fund tNIGHT at ${network.faucetUrl} , wait for Dust generation, then retry Deploy.`,
+    // CompactLab's fee sponsor runs on Preprod only, and only for invited users.
+    let deployFeeMode: FeeMode = network.sponsorship ? effectiveFeeMode(feeMode, sponsorStatus) : "self";
+    if (SPONSORED_FEES_ENABLED && network.sponsorship && feeMode === "sponsored" && deployFeeMode === "self") {
+      addLog(
+        makeLog(
+          "info",
+          `Sponsored fees aren't available for your account (${sponsorUnavailableReason(sponsorStatus)}). This Deploy uses your own tDUST.`,
+          "network",
+        ),
       );
-      return;
     }
 
-    if (SPONSORED_FEES_ENABLED && deployFeeMode === "sponsored") {
-      let status = sponsorStatus;
+    // Only Self-pay spends the user's tDUST, so only then is the balance checked.
+    let dustEmpty: boolean | null = null;
+    const userDustIsEmpty = async (): Promise<boolean> => {
+      if (dustEmpty !== null) return dustEmpty;
+      dustEmpty = false;
       try {
-        const res = await apiFetch("/v1/sponsor/status");
-        if (res.ok) {
-          status = (await res.json()) as SponsorStatusResponse;
-          setSponsorStatus(status);
+        const dust = await lace.refreshDustBalance();
+        if (dust) {
+          addLog(makeLog("info", `Your tDUST balance: ${dust.balanceLabel}`, "network"));
+          dustEmpty = dust.isEmpty;
         }
       } catch {
-        /* keep cached */
+        /* balance probe is best-effort; Deploy still proceeds if 1AM cannot report it */
       }
+      return dustEmpty;
+    };
 
+    if (SPONSORED_FEES_ENABLED && deployFeeMode === "sponsored") {
+      const status = await refreshSponsorStatus();
       if (!sponsorUsable(status)) {
-        if (!userDustEmpty) {
+        if (!(await userDustIsEmpty())) {
           const choice = await askSponsorFallback(
             sponsorUnavailableReason(status),
             Boolean(status?.syncing) && status?.access?.allowed !== false,
@@ -655,6 +604,13 @@ export function Topbar() {
           ),
         );
       }
+    }
+
+    if (deployFeeMode === "self" && (await userDustIsEmpty())) {
+      failDeploy(
+        `Your tDUST balance is 0. Fund tNIGHT at ${network.faucetUrl} , wait for Dust generation, then retry Deploy.`,
+      );
+      return;
     }
 
     const compactFile = activeProject?.files.find((f) => f.language === "compact");
@@ -730,6 +686,10 @@ export function Topbar() {
     setDeployResult(outcome);
     setStatus("idle");
     setDeployModalOpen(true);
+    if (outcome.success && deployFeeMode === "sponsored") {
+      // Update "N left today" now rather than at the next 60s poll.
+      void refreshSponsorStatus();
+    }
     if (outcome.success) {
       addLog(
         makeLog(
@@ -1013,7 +973,7 @@ export function Topbar() {
           >
             {exporting ? "Exporting…" : "Export project (.zip)"}
           </MenuItem>
-          {SPONSORED_FEES_ENABLED && network.sponsorship && (
+          {SPONSORED_FEES_ENABLED && network.sponsorship && sponsorOffered(sponsorStatus) && (
             <>
               <MenuSeparator />
               <MenuLabel>Network fees</MenuLabel>
@@ -1021,9 +981,8 @@ export function Topbar() {
                 const sponsoredUnavailable =
                   mode === "sponsored" &&
                   Boolean(sponsorStatus) &&
-                  (!sponsorStatus!.enabled ||
-                    sponsorStatus!.access?.blockedBy === "allowlist" ||
-                    (!sponsorStatus!.healthy && !sponsorStatus!.syncing));
+                  !sponsorStatus!.healthy &&
+                  !sponsorStatus!.syncing;
                 return (
                   <MenuItem
                     key={mode}

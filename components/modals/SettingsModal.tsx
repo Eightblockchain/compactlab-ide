@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui";
 import { useAuth } from "@/hooks/useAuth";
 import { ApiError, createBrowserApi, setToken } from "@/lib/api";
-import { SPONSORED_FEES_ENABLED, feeModeLabel, type FeeMode } from "@/lib/fee-mode";
+import { SPONSORED_FEES_ENABLED, feeModeLabel, sponsorOffered, type FeeMode } from "@/lib/fee-mode";
 import { useUserSettings } from "@/lib/user-settings";
 import { useIDEStore } from "@/store/ide";
 import { syncProjectNow } from "@/lib/project-sync";
@@ -109,6 +109,7 @@ export function SettingsModal({ open, onClose }: Props) {
   const [keyErr, setKeyErr] = useState<string | null>(null);
   const [keyBusy, setKeyBusy] = useState(false);
   const setFeeMode = useIDEStore((s) => s.setFeeMode);
+  const sponsorStatus = useIDEStore((s) => s.sponsorStatus);
 
   const [name, setName] = useState(user?.name ?? "");
   const [profileMsg, setProfileMsg] = useState<string | null>(null);
@@ -397,7 +398,7 @@ export function SettingsModal({ open, onClose }: Props) {
                 description="Reconnect automatically after refresh for up to 7 days (while 1AM still authorizes this site)."
               />
             </Row>
-            {SPONSORED_FEES_ENABLED && NETWORKS[network].sponsorship && (
+            {SPONSORED_FEES_ENABLED && NETWORKS[network].sponsorship && sponsorOffered(sponsorStatus) && (
               <Row className="space-y-2.5">
                 <p className="text-sm text-text-primary">Default fee mode</p>
                 <div className="flex flex-wrap gap-2">

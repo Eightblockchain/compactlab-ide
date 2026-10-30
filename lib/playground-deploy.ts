@@ -315,7 +315,7 @@ export async function deployPlaygroundContract(
       `View contract: ${oneAmContractUrl(contractAddress, network.id)}`,
     );
     if (transactionHash) {
-      log("info", `Tx: ${transactionHash}`);
+      log("info", `Tx hash: ${transactionHash}`);
     }
     log(
       "warn",
