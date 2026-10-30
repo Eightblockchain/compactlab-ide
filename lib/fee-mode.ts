@@ -1,7 +1,7 @@
 /**
  * Deploy/Call fee payment mode.
  *
- * - sponsored: CompactLab API pays DUST fees (user balances with payFees:false)
+ * - sponsored: CompactLab API pays DUST fees (the playground seals the tx itself; 1AM only proves)
  * - self: user pays fees from their own tDUST via 1AM (current default path historically)
  */
 

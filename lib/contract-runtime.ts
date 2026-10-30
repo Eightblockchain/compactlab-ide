@@ -134,17 +134,26 @@ export async function createContractProviders(
     accountId: `${storeName}:${coinPublicKey}`,
   });
 
-  const payFees = feeMode === "self";
-
   const walletProvider: WalletProvider = {
     getCoinPublicKey: () => coinPublicKey,
     getEncryptionPublicKey: () => addresses.shieldedEncryptionPublicKey,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     balanceTx: async (tx: UnboundTransaction, _ttl?: Date): Promise<any> => {
+      if (feeMode === "sponsored") {
+        // 1AM ignores { payFees: false } and adds its own DUST fee, leaving the
+        // sponsor nothing to pay. A tx that moves no tokens needs no wallet
+        // balancing, so seal it here; the sponsor adds the fee.
+        if (movesTokens(tx)) {
+          throw new Error(
+            "This transaction moves shielded or unshielded tokens, which only your wallet can balance. Switch fee mode to Self-pay.",
+          );
+        }
+        return tx.bind();
+      }
       const hexUnbound = toHex(tx.serialize());
       const { tx: hexBalanced } = await wallet.balanceUnsealedTransaction(
         hexUnbound,
-        { payFees },
+        { payFees: true },
       );
       return Transaction.deserialize(
         "signature" as SignatureEnabled["instance"],
@@ -195,6 +204,14 @@ export async function createContractProviders(
     walletProvider,
     midnightProvider,
   } as AnyProviders;
+}
+
+/** True when any segment has a non-DUST imbalance (token inputs or outputs). */
+export function movesTokens(tx: Pick<UnboundTransaction, "imbalances" | "intents">): boolean {
+  const segments = [0, ...(tx.intents?.keys() ?? [])];
+  return segments.some((segment) =>
+    [...tx.imbalances(segment).entries()].some(([token, value]) => token.tag !== "dust" && value !== BigInt(0)),
+  );
 }
 
 /** Dynamically load a contract module from a same-origin asset base. */
