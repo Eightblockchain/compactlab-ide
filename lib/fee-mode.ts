@@ -70,6 +70,19 @@ export function sponsorUsable(status: SponsorStatusResponse | null): boolean {
   return Boolean(status?.healthy) && status?.access?.allowed !== false;
 }
 
+/**
+ * Sponsored is worth offering to this user at all: the server has it on and
+ * the user is invited. While status is still loading, assume yes.
+ */
+export function sponsorOffered(status: SponsorStatusResponse | null): boolean {
+  return !status || (status.enabled && status.access?.blockedBy !== "allowlist");
+}
+
+/** The mode a Deploy or Call actually uses: Self-pay when Sponsored isn't offered. */
+export function effectiveFeeMode(mode: FeeMode, status: SponsorStatusResponse | null): FeeMode {
+  return SPONSORED_FEES_ENABLED && sponsorOffered(status) ? mode : "self";
+}
+
 /** Why Sponsored can't be used now, for the fallback prompt. */
 export function sponsorUnavailableReason(status: SponsorStatusResponse | null): string {
   if (status?.access && !status.access.allowed && status.access.reason) return status.access.reason;

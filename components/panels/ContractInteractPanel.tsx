@@ -23,7 +23,8 @@ import {
   validateCompactParams,
 } from "@/lib/compact-values";
 import { isVoidCircuitOutput } from "@/lib/compact-runtime-format";
-import { normalizeFeeMode, sponsorUnavailableReason, sponsorUsable } from "@/lib/fee-mode";
+import { effectiveFeeMode, normalizeFeeMode, sponsorUnavailableReason, sponsorUsable } from "@/lib/fee-mode";
+import { refreshSponsorStatus } from "@/lib/sponsor-status";
 import { NETWORKS } from "@/lib/network";
 import { useActiveNetwork, useUserSettings } from "@/lib/user-settings";
 import { explainIndexerLimit } from "@/lib/indexer-endpoints";
@@ -223,18 +224,16 @@ export function ContractInteractPanel() {
     compiledSourceHash: activeProject?.compiledSourceHash,
     currentSource: liveCompact,
   });
-  const canCallOnChain =
-    !!lace.connectedAPI && !!activeAddress && deployGate.canDeploy && !witnessErr;
+  // 1AM connects on click, like Deploy; it isn't needed in advance.
+  const canCallOnChain = !!activeAddress && deployGate.canDeploy && !witnessErr;
 
   const callBlockedReason = !activeAddress
     ? "Deploy from the toolbar to get a contract address."
-    : !lace.connectedAPI
-      ? "Connect 1AM to send transactions."
-      : !deployGate.canDeploy
-        ? deployGate.reason
-        : witnessErr
-          ? witnessErr
-          : null;
+    : !deployGate.canDeploy
+      ? deployGate.reason
+      : witnessErr
+        ? witnessErr
+        : null;
 
   const handleLoadAddress = (addrOverride?: string) => {
     const addr = (addrOverride ?? addressInput).trim();
@@ -293,17 +292,28 @@ export function ContractInteractPanel() {
     setBottomPanelOpen(true);
 
     try {
-      const liveApi = await lace.ensureSession();
+      if (!lace.connectedAPI) {
+        addLog({
+          id: generateId(),
+          timestamp: Date.now(),
+          level: "info",
+          message: "Connecting to 1AM wallet…",
+          source: "network",
+        });
+      }
+      const wasConnected = !!lace.connectedAPI;
+      const liveApi = wasConnected ? await lace.ensureSession() : await lace.connect();
       if (!liveApi) {
-        const msg =
-          lace.error && isWalletSessionExpiredMessage(lace.error)
+        const msg = !wasConnected
+          ? `Could not connect 1AM. Install it from https://1am.xyz/, unlock it on ${network.label}, approve this site, then try again.`
+          : lace.error && isWalletSessionExpiredMessage(lace.error)
             ? lace.error
             : WALLET_SESSION_EXPIRED_MSG;
         addLog({
           id: generateId(),
           timestamp: Date.now(),
           level: "warn",
-          message: `${msg} Reconnect 1AM, then try the circuit again.`,
+          message: wasConnected ? `${msg} Reconnect 1AM, then try the circuit again.` : msg,
           source: "network",
         });
         setLastResult({ success: false, message: msg });
@@ -312,8 +322,10 @@ export function ContractInteractPanel() {
       }
 
       const { callPlaygroundCircuit } = await import("@/lib/playground-call");
-      const feeMode = normalizeFeeMode(useIDEStore.getState().feeMode);
       const sponsorStatus = useIDEStore.getState().sponsorStatus;
+      const feeMode = network.sponsorship
+        ? effectiveFeeMode(normalizeFeeMode(useIDEStore.getState().feeMode), sponsorStatus)
+        : "self";
       if (feeMode === "sponsored" && network.sponsorship && sponsorStatus && !sponsorUsable(sponsorStatus)) {
         // Don't silently switch to the user's own tDUST; let them choose Self-pay.
         const msg = `Sponsored fees unavailable: ${sponsorUnavailableReason(sponsorStatus)} Switch to Self-pay in the ⋯ menu to call now.`;
@@ -369,6 +381,7 @@ export function ContractInteractPanel() {
         blockHeight: result.blockHeight,
         returnValue: result.returnValue,
       });
+      if (feeMode === "sponsored") void refreshSponsorStatus();
       await fetchState(activeAddress);
       void refreshUntilSettled(activeAddress);
     } catch (err) {

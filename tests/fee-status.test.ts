@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { feeStatusView } from "../components/layout/FeeStatusBadge";
-import { sponsorUnavailableReason, sponsorUsable, type SponsorStatusResponse } from "../lib/fee-mode";
+import {
+  sponsorOffered,
+  sponsorUnavailableReason,
+  sponsorUsable,
+  type SponsorStatusResponse,
+} from "../lib/fee-mode";
 
 const healthy: SponsorStatusResponse = {
   enabled: true,
@@ -46,6 +51,12 @@ describe("fee status badge", () => {
     );
   });
 
+  it("shows self-pay when sponsorship is off on the server", () => {
+    const v = feeStatusView("sponsored", { ...healthy, enabled: false, healthy: false, reason: "off" });
+    expect(v.label).toBe("Fees: self-pay");
+    expect(v.title).toBe("off");
+  });
+
   it("shows self-pay when the user chose it", () => {
     expect(feeStatusView("self", healthy).label).toBe("Fees: self-pay");
   });
@@ -62,5 +73,29 @@ describe("sponsorUsable", () => {
     expect(sponsorUsable(blocked)).toBe(false);
     expect(sponsorUnavailableReason(blocked)).toBe("invite-only");
     expect(sponsorUsable(null)).toBe(false);
+  });
+});
+
+describe("sponsorOffered", () => {
+  it("hides Sponsored when the server has it off or the user is not invited", () => {
+    expect(sponsorOffered(null)).toBe(true);
+    expect(sponsorOffered(healthy)).toBe(true);
+    expect(sponsorOffered({ ...healthy, enabled: false })).toBe(false);
+    expect(
+      sponsorOffered({
+        ...healthy,
+        access: { allowed: false, blockedBy: "allowlist", reason: "invite-only", dailyLimit: 20, remainingToday: 0 },
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps Sponsored offered when only today's quota or health is the problem", () => {
+    expect(sponsorOffered({ ...healthy, healthy: false, syncing: true })).toBe(true);
+    expect(
+      sponsorOffered({
+        ...healthy,
+        access: { allowed: false, blockedBy: "daily_limit", reason: "limit", dailyLimit: 20, remainingToday: 0 },
+      }),
+    ).toBe(true);
   });
 });

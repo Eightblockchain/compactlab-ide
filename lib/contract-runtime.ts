@@ -464,8 +464,9 @@ export class PlaygroundContractAPI {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const pub = deployed.deployTxData?.public as any;
+    // The hash is what explorers search for; the tx id is a different value.
     const transactionHash: string | undefined =
-      pub?.txId ?? pub?.transactionHash ?? pub?.txHash ?? undefined;
+      pub?.txHash ?? pub?.transactionHash ?? pub?.txId ?? undefined;
     const blockNumber: number | undefined =
       typeof pub?.blockHeight === "number"
         ? pub.blockHeight

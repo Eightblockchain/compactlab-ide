@@ -153,7 +153,7 @@ export async function callPlaygroundCircuit(
     const duration = Date.now() - t0;
     log(addLog, "success", `${circuitName} confirmed in ${(duration / 1000).toFixed(1)}s`);
     if (txResult.status) log(addLog, "info", `Tx status: ${txResult.status}`);
-    log(addLog, "success", `Tx ID: ${txResult.txId}`);
+    log(addLog, "success", txResult.txHash ? `Tx hash: ${txResult.txHash}` : `Tx ID: ${txResult.txId}`);
     if (txResult.returnValue && txResult.returnValue !== "[]") {
       log(addLog, "info", `Circuit return: ${txResult.returnValue}`);
     }

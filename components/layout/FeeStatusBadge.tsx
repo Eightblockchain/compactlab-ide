@@ -46,9 +46,9 @@ export function feeStatusView(feeMode: FeeMode, status: SponsorStatusResponse | 
   }
   if (!status.enabled) {
     return {
-      label: "Sponsored fees off",
+      label: "Fees: self-pay",
       variant: "muted",
-      title: status.reason ?? "Sponsorship is turned off on this server. Use Self-pay.",
+      title: status.reason ?? "Sponsored fees are turned off on this server.",
     };
   }
   if (!status.healthy && status.syncing) {
