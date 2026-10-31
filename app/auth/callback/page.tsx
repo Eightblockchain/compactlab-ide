@@ -45,7 +45,7 @@ function AuthCallbackInner() {
   }, [params, refresh, router]);
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-surface px-4">
+    <main className="h-full overflow-y-auto flex flex-col items-center justify-center-safe bg-surface px-4 py-10">
       <div className="text-sm text-text-muted">
         {error ? (
           <div className="space-y-3 text-center">
@@ -66,7 +66,7 @@ export default function AuthCallbackPage() {
   return (
     <Suspense
       fallback={
-        <main className="min-h-screen flex items-center justify-center bg-surface px-4">
+        <main className="h-full overflow-y-auto flex flex-col items-center justify-center-safe bg-surface px-4 py-10">
           <div className="text-sm text-text-muted">Completing sign-in…</div>
         </main>
       }

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { OAuthButtons } from "@/components/auth/OAuthButtons";
+import { Turnstile, TURNSTILE_SITE_KEY } from "@/components/auth/Turnstile";
 import { CompactLabLogo } from "@/components/brand/CompactLabLogo";
 
 function LoginForm() {
@@ -15,6 +16,10 @@ function LoginForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  // A Turnstile token works once: remount the widget for a fresh one after a failed try.
+  const [checkKey, setCheckKey] = useState(0);
+  const waitingForCheck = Boolean(TURNSTILE_SITE_KEY) && !turnstileToken;
 
   useEffect(() => {
     const oauthErr = params.get("error");
@@ -30,17 +35,19 @@ function LoginForm() {
     setBusy(true);
     setError(null);
     try {
-      await login(email, password);
+      await login(email, password, turnstileToken ?? undefined);
       router.replace("/playground");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
+      setTurnstileToken(null);
+      setCheckKey((k) => k + 1);
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-surface px-4">
+    <main className="h-full overflow-y-auto flex flex-col items-center justify-center-safe bg-surface px-4 py-10">
       <div className="w-full max-w-md border border-border rounded-xl p-6 sm:p-7 bg-surface-elevated space-y-5">
         <div className="space-y-4">
           <CompactLabLogo height={32} className="h-8 w-auto" />
@@ -80,13 +87,14 @@ function LoginForm() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
+          <Turnstile key={checkKey} onToken={setTurnstileToken} />
           {error && <p className="text-sm text-red-400">{error}</p>}
           <button
             type="submit"
-            disabled={busy}
+            disabled={busy || waitingForCheck}
             className="w-full rounded-md bg-accent text-black font-medium py-2 text-sm disabled:opacity-60"
           >
-            {busy ? "Signing in…" : "Log in"}
+            {busy ? "Signing in…" : waitingForCheck ? "Checking you're human…" : "Log in"}
           </button>
         </form>
         <p className="text-2xs text-text-muted text-center">
@@ -105,7 +113,7 @@ export default function LoginPage() {
   return (
     <Suspense
       fallback={
-        <main className="min-h-screen flex items-center justify-center bg-surface px-4">
+        <main className="h-full overflow-y-auto flex flex-col items-center justify-center-safe bg-surface px-4 py-10">
           <div className="text-sm text-text-muted">Loading…</div>
         </main>
       }

@@ -13,6 +13,8 @@ export function EmailSignupForm({ onDone, submitLabel = "Create account" }: { on
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  // A Turnstile token works once: remount the widget for a fresh one after a failed try.
+  const [checkKey, setCheckKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const waitingForCheck = Boolean(TURNSTILE_SITE_KEY) && !turnstileToken;
@@ -26,6 +28,8 @@ export function EmailSignupForm({ onDone, submitLabel = "Create account" }: { on
       onDone();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Signup failed");
+      setTurnstileToken(null);
+      setCheckKey((k) => k + 1);
       setBusy(false);
     }
   }
@@ -52,7 +56,7 @@ export function EmailSignupForm({ onDone, submitLabel = "Create account" }: { on
         value={password}
         onChange={(e) => setPassword(e.target.value)}
       />
-      <Turnstile onToken={setTurnstileToken} />
+      <Turnstile key={checkKey} onToken={setTurnstileToken} />
       {error && <p className="text-sm text-red-400">{error}</p>}
       <button
         type="submit"

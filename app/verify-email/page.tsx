@@ -39,7 +39,11 @@ function VerifyEmailInner() {
       {state.status === "done" && (
         <>
           <h1 className="text-xl font-semibold text-text-primary">Email confirmed</h1>
-          <p className="text-sm text-text-muted">You can now deploy and call contracts.</p>
+          <p className="text-sm text-text-muted">
+            {user
+              ? "You can now deploy and call contracts."
+              : "Log in the same way you signed up: with your email and password, or with Google or GitHub."}
+          </p>
           <Link
             href={user ? "/playground" : "/login"}
             className="block w-full text-center rounded-md bg-accent text-black font-medium py-2 text-sm"
@@ -67,7 +71,7 @@ function VerifyEmailInner() {
 
 export default function VerifyEmailPage() {
   return (
-    <main className="min-h-screen flex items-center justify-center bg-surface px-4">
+    <main className="h-full overflow-y-auto flex flex-col items-center justify-center-safe bg-surface px-4 py-10">
       <div className="w-full max-w-md border border-border rounded-xl p-6 sm:p-7 bg-surface-elevated space-y-5">
         <CompactLabLogo height={32} className="h-8 w-auto" />
         <Suspense fallback={<p className="text-sm text-text-muted">Confirming your email…</p>}>
