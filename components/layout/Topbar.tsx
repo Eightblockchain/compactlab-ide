@@ -511,7 +511,7 @@ export function Topbar() {
       connectedAPI = await lace.connect();
       if (!connectedAPI) {
         failDeploy(
-          lace.error ??
+          lace.lastError() ??
             `Could not connect. CompactLab only supports 1AM (https://1am.xyz/). Install it, unlock it, set ${network.label}, approve this site, then retry.`,
         );
         return;
@@ -753,7 +753,7 @@ export function Topbar() {
       addLog(
         makeLog(
           "error",
-          lace.error ??
+          lace.lastError() ??
             `1AM required. Install from https://1am.xyz/, unlock, select ${network.label}, approve this site.`,
           "network",
         ),

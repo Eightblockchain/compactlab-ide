@@ -310,7 +310,9 @@ export function ContractInteractPanel() {
         liveApi = await lace.connect();
       }
       if (!liveApi) {
-        const msg = `Could not connect 1AM. Install it from https://1am.xyz/, unlock it on ${network.label}, approve this site, then try again.`;
+        const msg =
+          lace.lastError() ??
+          `Could not connect 1AM. Install it from https://1am.xyz/, unlock it on ${network.label}, approve this site, then try again.`;
         addLog({ id: generateId(), timestamp: Date.now(), level: "warn", message: msg, source: "network" });
         setLastResult({ success: false, message: msg });
         setCallingCircuit(null);

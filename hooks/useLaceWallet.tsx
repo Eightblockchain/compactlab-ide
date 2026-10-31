@@ -72,6 +72,11 @@ export interface UseMidnightWalletReturn {
   markSessionExpired: (detail?: string) => void;
   /** Re-scan window.midnight after installing/enabling 1AM. */
   refreshWallets: () => void;
+  /**
+   * Error from the latest connect attempt. Read this after `await connect()`:
+   * `error` in a handler's closure still holds the value from before the click.
+   */
+  lastError: () => string | null;
 }
 
 /** @deprecated Use UseMidnightWalletReturn */
@@ -85,6 +90,11 @@ const targetNetwork = () => getActiveNetwork().id;
 const SILENT_CONNECT_TIMEOUT_MS = 8_000;
 /** How often to ask 1AM whether the DApp connection is still alive. */
 const SESSION_POLL_MS = 12_000;
+/**
+ * Right after connect() 1AM can briefly report "disconnected", so one failed
+ * probe is not enough to drop a session the user just approved.
+ */
+const PROBE_FAILURES_BEFORE_EXPIRED = 2;
 
 async function assertUsableConnection(api: ConnectedAPI): Promise<void> {
   if (typeof api.getProvingProvider !== "function") {
@@ -119,6 +129,8 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
   const [connectedWalletName, setConnectedWalletName] = useState<string | null>(null);
   const [dustBalance, setDustBalance] = useState<DustBalanceInfo | null>(null);
   const connectGeneration = useRef(0);
+  const lastErrorRef = useRef<string | null>(null);
+  const lastError = useCallback(() => lastErrorRef.current, []);
 
   const refreshWallets = useCallback(() => {
     setAvailableWallets(listMidnightWallets());
@@ -126,6 +138,7 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
 
   const clearSessionLocal = useCallback((message: string | null, nextStatus: ConnectionStatus) => {
     connectGeneration.current += 1;
+    lastErrorRef.current = message;
     setConnectedAPI(null);
     setWalletInfo(null);
     setConnectedWalletName(null);
@@ -230,18 +243,24 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
   useEffect(() => {
     if (!connectedAPI || status !== "connected") return;
     let cancelled = false;
+    let failures = 0;
 
     const check = async () => {
       const probe = await probeWalletSession(connectedAPI, targetNetwork());
       if (cancelled) return;
-      if (!probe.ok) {
-        markSessionExpired(
-          probe.reason === "wrong-network" ? probe.detail : WALLET_SESSION_EXPIRED_MSG,
-        );
+      if (probe.ok) {
+        failures = 0;
+        return;
       }
+      if (probe.reason === "wrong-network") {
+        markSessionExpired(probe.detail);
+        return;
+      }
+      failures += 1;
+      if (failures >= PROBE_FAILURES_BEFORE_EXPIRED) markSessionExpired(WALLET_SESSION_EXPIRED_MSG);
     };
 
-    void check();
+    // No immediate check: connectTo() has just probed this session.
     const id = setInterval(() => void check(), SESSION_POLL_MS);
     const onVisible = () => {
       if (document.visibilityState === "visible") void check();
@@ -266,6 +285,7 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
       setStatus("connecting");
       setError(null);
     }
+    lastErrorRef.current = null;
 
     const generation = ++connectGeneration.current;
     let timedOut = false;
@@ -324,6 +344,7 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
     } catch (err) {
       if (generation !== connectGeneration.current) return null;
       const message = serializeWalletErr(err);
+      lastErrorRef.current = message;
       if (options?.silent) {
         // Timed-out or rejected restore: stay disconnected, no error banner.
         setStatus("disconnected");
@@ -344,18 +365,20 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
     const wallets = listMidnightWallets();
     setAvailableWallets(wallets);
     if (wallets.length === 0) {
-      setError(
-        "1AM wallet not found. Install 1AM from https://1am.xyz/, unlock it, enable this site, then reload.",
-      );
+      const message =
+        "1AM wallet not found. Install 1AM from https://1am.xyz/, unlock it, enable this site, then reload.";
+      lastErrorRef.current = message;
+      setError(message);
       setStatus("error");
       return null;
     }
-    if (wallets.length > 1) {
-      setError("Multiple 1AM injections detected - choose one from the menu.");
-      setStatus("error");
-      return null;
+    // After 1AM updates or restarts, the tab can hold a stale injection next to
+    // the live one. The newest is injected last, so try from the end.
+    for (let i = wallets.length - 1; i >= 0; i--) {
+      const api = await connectTo(wallets[i]);
+      if (api) return api;
     }
-    return connectTo(wallets[0]);
+    return null;
   }, [connectTo]);
 
   const disconnect = useCallback(() => {
@@ -419,6 +442,7 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
       ensureSession,
       markSessionExpired,
       refreshWallets,
+      lastError,
     }),
     [
       availableWallets,
@@ -435,6 +459,7 @@ function useMidnightWalletState(): UseMidnightWalletReturn {
       ensureSession,
       markSessionExpired,
       refreshWallets,
+      lastError,
     ],
   );
 }

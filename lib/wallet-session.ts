@@ -31,6 +31,11 @@ export function isWalletSessionExpiredMessage(message: string): boolean {
     lower.includes("please reconnect") ||
     lower.includes("connection to the wallet was lost") ||
     lower.includes("wallet was lost") ||
+    // 1AM's proving UI lost its link to this tab; getConnectionStatus() may still
+    // say "connected", but only a fresh connect() makes proving work again.
+    lower.includes("wallet ui disconnected") ||
+    lower.includes("extension context invalidated") ||
+    lower.includes("receiving end does not exist") ||
     (lower.includes("disconnected") &&
       (lower.includes("reconnect") || lower.includes("connection")))
   );
