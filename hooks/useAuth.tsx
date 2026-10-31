@@ -32,7 +32,7 @@ type AuthContextValue = {
   maintenance: boolean;
   /** Re-check maintenance now; resolves to true while it is still on. */
   checkMaintenance: () => Promise<boolean>;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, turnstileToken?: string) => Promise<void>;
   signup: (email: string, password: string, name?: string, turnstileToken?: string) => Promise<{ emailSent: boolean }>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
@@ -101,8 +101,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(
-    async (email: string, password: string) => {
-      const res = await api.login({ email, password });
+    async (email: string, password: string, turnstileToken?: string) => {
+      const res = await api.login({ email, password, turnstileToken });
       setToken(res.token);
       setUser(res.user);
       setEntitlements(res.entitlements);

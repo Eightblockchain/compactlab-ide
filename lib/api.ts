@@ -123,7 +123,7 @@ export function createBrowserApi() {
         "/v1/auth/signup",
         { method: "POST", json: body },
       ),
-    login: (body: { email: string; password: string }) =>
+    login: (body: { email: string; password: string; turnstileToken?: string }) =>
       request<{ user: UserPublic; token: string; entitlements: Entitlements }>(
         "/v1/auth/login",
         { method: "POST", json: body },

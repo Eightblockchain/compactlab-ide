@@ -16,7 +16,7 @@ export default function SignupPage() {
   }, [loading, user, router]);
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-surface px-4">
+    <main className="h-full overflow-y-auto flex flex-col items-center justify-center-safe bg-surface px-4 py-10">
       <div className="w-full max-w-md border border-border rounded-xl p-6 sm:p-7 bg-surface-elevated space-y-5">
         <div className="space-y-4">
           <CompactLabLogo height={32} className="h-8 w-auto" />
