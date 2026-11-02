@@ -627,10 +627,9 @@ export function Topbar() {
       }
     }
 
-    let outcome: DeployResult;
-    try {
-      outcome = await deployPlaygroundContract(
-        connectedAPI,
+    const runDeploy = (api: NonNullable<typeof connectedAPI>) =>
+      deployPlaygroundContract(
+        api,
         template,
         addLog,
         {
@@ -647,22 +646,39 @@ export function Topbar() {
           onStage: (s) => setDeployStage(s),
         },
       );
+
+    let outcome: DeployResult;
+    try {
+      outcome = await runDeploy(connectedAPI);
+      // 1AM dropped the session before anything was sent: reconnect (1AM opens
+      // for approval) and finish the Deploy in this same click.
+      if (!outcome.success && outcome.sessionLost?.beforeSubmit) {
+        addLog(makeLog("warn", "1AM disconnected before the transaction was sent. Reconnecting: approve in 1AM to continue.", "network"));
+        setDeployStage("connect");
+        const fresh = await lace.connect();
+        if (fresh) {
+          addLog(makeLog("success", "1AM reconnected. Continuing the deploy…", "network"));
+          outcome = await runDeploy(fresh);
+        } else {
+          outcome = { ...outcome, error: lace.lastError() ?? outcome.error };
+        }
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       addLog(makeLog("error", `Deploy failed: ${message}`, "network"));
       outcome = { success: false, duration: Date.now() - started, error: message };
     }
 
-    if (
-      !outcome.success &&
-      outcome.error &&
-      isWalletSessionExpiredMessage(outcome.error)
-    ) {
-      lace.markSessionExpired(WALLET_SESSION_EXPIRED_MSG);
+    if (!outcome.success && outcome.sessionLost) {
+      lace.markSessionExpired();
       outcome = {
         ...outcome,
-        error: "1AM connection expired during Deploy. Click Reconnect and deploy again; your inputs are kept.",
+        error: outcome.sessionLost.beforeSubmit
+          ? "1AM disconnected again before the transaction was sent. Reload the page (your work is saved), then deploy again."
+          : "1AM disconnected after the transaction was sent, so it wasn't sent twice. Check the explorer before deploying again.",
       };
+    } else if (!outcome.success && outcome.error && isWalletSessionExpiredMessage(outcome.error)) {
+      lace.markSessionExpired();
     }
 
     setDeployResult(outcome);
@@ -1069,7 +1085,11 @@ export function Topbar() {
         setDeployModalOpen(false);
       }}
       retry={
-        deployResult && !deployResult.success && isWalletSessionExpiredMessage(deployResult.error ?? "")
+        deployResult &&
+        !deployResult.success &&
+        (deployResult.sessionLost
+          ? deployResult.sessionLost.beforeSubmit
+          : isWalletSessionExpiredMessage(deployResult.error ?? ""))
           ? {
               label: "Reconnect and deploy again",
               onClick: () => {

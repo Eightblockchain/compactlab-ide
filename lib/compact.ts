@@ -86,6 +86,8 @@ export interface DeployResult {
   error?: string;
   /** Network the contract was deployed on (older results: Preprod). */
   network?: import("@/lib/network").PlaygroundNetwork;
+  /** 1AM dropped the session; `beforeSubmit` means nothing was sent, so Deploy can safely run again. */
+  sessionLost?: { beforeSubmit: boolean };
 }
 
 /** Client helper: POST /v1/compile on the shared API (queued + polled). */

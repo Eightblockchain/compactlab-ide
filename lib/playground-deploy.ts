@@ -176,6 +176,7 @@ export async function deployPlaygroundContract(
   }
 
   stage("providers");
+  let submitStarted = false;
   log("info", `Connecting to Midnight ${network.label}…`);
   log("info", INDEXER_SOURCE_LOG[indexerSource(network)](network.label));
 
@@ -189,20 +190,23 @@ export async function deployPlaygroundContract(
       connectedAPI as Parameters<typeof createContractProviders>[0],
       networkConfig(network),
       assetBase,
-      { storeName: `compactlab:${slug}`, feeMode, projectId: options?.projectId },
+      {
+        storeName: `compactlab:${slug}`,
+        feeMode,
+        projectId: options?.projectId,
+        onTxStage: (s) => {
+          if (s === "submit") submitStarted = true;
+        },
+      },
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (isWalletSessionExpiredError(err) || isWalletSessionExpiredMessage(msg)) {
-      log("warn", WALLET_SESSION_EXPIRED_MSG);
-      log(
-        "warn",
-        "Deploy paused. Click Reconnect and deploy again; your inputs are kept.",
-      );
       return {
         success: false,
         duration: Date.now() - t0,
         error: WALLET_SESSION_EXPIRED_MSG,
+        sessionLost: { beforeSubmit: !submitStarted },
       };
     }
     log("error", `Failed to initialise providers: ${msg}`);
@@ -263,15 +267,11 @@ export async function deployPlaygroundContract(
 
     const msg = serialize(err);
     if (isWalletSessionExpiredError(err) || isWalletSessionExpiredMessage(msg)) {
-      log("warn", WALLET_SESSION_EXPIRED_MSG);
-      log(
-        "warn",
-        "Deploy paused. Click Reconnect and deploy again; your inputs are kept.",
-      );
       return {
         success: false,
         duration: Date.now() - t0,
         error: WALLET_SESSION_EXPIRED_MSG,
+        sessionLost: { beforeSubmit: !submitStarted },
       };
     }
     log("error", `Deploy transaction failed: ${msg}`);
