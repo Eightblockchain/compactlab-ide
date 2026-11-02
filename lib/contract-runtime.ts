@@ -78,7 +78,15 @@ export type CreateContractProvidersOptions = {
   feeMode?: FeeMode;
   /** Sent with sponsored submits so the API can log the spend per project. */
   projectId?: string | null;
+  /** Called as each step of a transaction starts, for progress UI and safe retries. */
+  onTxStage?: (stage: TxStage) => void;
 };
+
+/**
+ * Steps of one transaction. Until "submit" starts nothing has left the browser,
+ * so a failure before it can be retried without sending the transaction twice.
+ */
+export type TxStage = "prove" | "balance" | "submit" | "confirm";
 
 /**
  * Build Midnight providers pointed at a ZK asset base URL
@@ -117,11 +125,19 @@ export async function createContractProviders(
     (url: string | Request | URL, init?: RequestInit) => window.fetch(url, init),
   );
 
-  const proofProvider = await dappConnectorProofProvider(
+  const onTxStage = options.onTxStage ?? (() => {});
+  const walletProofProvider = await dappConnectorProofProvider(
     wallet,
     zkConfigProvider,
     CostModel.initialCostModel(),
   );
+  const proofProvider: typeof walletProofProvider = {
+    ...walletProofProvider,
+    proveTx: (...args: Parameters<typeof walletProofProvider.proveTx>) => {
+      onTxStage("prove");
+      return walletProofProvider.proveTx(...args);
+    },
+  };
 
   const { getIndexerEndpoints } = await import("@/lib/indexer-endpoints");
   const { networkInfoFor } = await import("@/lib/network");
@@ -139,6 +155,7 @@ export async function createContractProviders(
     getEncryptionPublicKey: () => addresses.shieldedEncryptionPublicKey,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     balanceTx: async (tx: UnboundTransaction, _ttl?: Date): Promise<any> => {
+      onTxStage("balance");
       if (feeMode === "sponsored") {
         // 1AM ignores { payFees: false } and adds its own DUST fee, leaving the
         // sponsor nothing to pay. A tx that moves no tokens needs no wallet
@@ -167,6 +184,7 @@ export async function createContractProviders(
   const midnightProvider: MidnightProvider = {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     submitTx: async (tx: any): Promise<TransactionId> => {
+      onTxStage("submit");
       const hexFinalized = toHex(tx.serialize());
       if (feeMode === "sponsored") {
         const res = await apiFetch("/v1/sponsor", {
@@ -187,10 +205,12 @@ export async function createContractProviders(
             body.error || `Sponsorship failed (${res.status}). Switch to Self-pay or retry later.`,
           );
         }
+        onTxStage("confirm");
         return (body.txId || hexFinalized.slice(0, 64)) as TransactionId;
       }
 
       await wallet.submitTransaction(hexFinalized);
+      onTxStage("confirm");
       const ids = tx.identifiers();
       return ids[0] ?? hexFinalized.slice(0, 64);
     },

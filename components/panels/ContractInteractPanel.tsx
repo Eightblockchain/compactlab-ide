@@ -10,8 +10,9 @@ import { cn, generateId } from "@/lib/utils";
 import {
   useLaceWallet,
   isWalletSessionExpiredMessage,
-  WALLET_SESSION_EXPIRED_MSG,
 } from "@/hooks/useLaceWallet";
+import { WalletSessionLostError } from "@/lib/wallet-session";
+import { CallProgress, type CallUiStage } from "@/components/panels/CallProgress";
 import { getDeployGate, getLiveCompactSource } from "@/lib/deploy-gate";
 import { isOutdatedManagedArtifactUrl, OUTDATED_ARTIFACT_MESSAGE } from "@/lib/playground-assets";
 import { contractExplorerUrl, txExplorerUrl } from "@/lib/explorers";
@@ -218,6 +219,12 @@ export function ContractInteractPanel() {
   const [circuitInputs, setCircuitInputs] = useState<Record<string, Record<string, string>>>({});
   const [lastResult, setLastResult] = useState<CircuitCallResult | null>(null);
   const [callingCircuit, setCallingCircuit] = useState<string | null>(null);
+  const [callProgress, setCallProgress] = useState<{
+    stage: CallUiStage;
+    startedAt: number;
+    sponsored: boolean;
+    note: string | null;
+  } | null>(null);
 
   const template = activeProject?.template ?? "";
   const deployGate = getDeployGate({
@@ -292,9 +299,16 @@ export function ContractInteractPanel() {
     }
 
     setCallingCircuit(selected.name);
+    setLastResult(null);
     clearLogs();
     setLogTab("network");
     setBottomPanelOpen(true);
+    const startedAt = Date.now();
+    const progress = (stage: CallUiStage, note: string | null = null) =>
+      setCallProgress((prev) => ({ sponsored: false, ...prev, stage, startedAt, note }));
+    progress("connect");
+    const note = (level: "info" | "warn" | "success", message: string) =>
+      addLog({ id: generateId(), timestamp: Date.now(), level, message, source: "network" });
 
     try {
       let liveApi = lace.connectedAPI ? await lace.ensureSession() : null;
@@ -316,6 +330,7 @@ export function ContractInteractPanel() {
         addLog({ id: generateId(), timestamp: Date.now(), level: "warn", message: msg, source: "network" });
         setLastResult({ success: false, message: msg });
         setCallingCircuit(null);
+        setCallProgress(null);
         return;
       }
 
@@ -336,6 +351,7 @@ export function ContractInteractPanel() {
         });
         setLastResult({ success: false, message: msg });
         setCallingCircuit(null);
+        setCallProgress(null);
         return;
       }
       if (feeMode === "self" && lace.dustBalance?.isEmpty) {
@@ -350,16 +366,12 @@ export function ContractInteractPanel() {
         });
         setLastResult({ success: false, message: msg });
         setCallingCircuit(null);
+        setCallProgress(null);
         return;
       }
-      const result = await callPlaygroundCircuit(
-        liveApi,
-        activeProject!.template,
-        activeAddress,
-        selected.name,
-        inputs,
-        addLog,
-        {
+      setCallProgress((prev) => (prev ? { ...prev, sponsored: feeMode === "sponsored" } : prev));
+      const run = (api: NonNullable<typeof liveApi>) =>
+        callPlaygroundCircuit(api, activeProject!.template, activeAddress, selected.name, inputs, addLog, {
           artifactBaseUrl: activeProject?.artifactBaseUrl,
           projectId: activeProject?.id,
           witnessSpecs: witnesses,
@@ -368,8 +380,33 @@ export function ContractInteractPanel() {
           circuitParams: selected.inputs,
           typeEnv,
           feeMode,
-        },
-      );
+          onStage: (stage) => progress(stage),
+        });
+
+      let result: Awaited<ReturnType<typeof run>>;
+      try {
+        result = await run(liveApi);
+      } catch (err) {
+        // 1AM dropped the session. If nothing was sent yet, reconnect (1AM opens
+        // for approval) and finish the Call in this same click.
+        const lost =
+          err instanceof WalletSessionLostError
+            ? err
+            : isWalletSessionExpiredMessage(err instanceof Error ? err.message : String(err))
+              ? new WalletSessionLostError(true)
+              : null;
+        if (!lost?.beforeSubmit) throw lost ?? err;
+        const reconnecting = "1AM disconnected before the transaction was sent. Reconnecting: approve in 1AM to continue.";
+        note("warn", reconnecting);
+        progress("connect", reconnecting);
+        const fresh = await lace.connect();
+        if (!fresh) {
+          throw new Error(lace.lastError() ?? "Could not reconnect 1AM. Unlock it, approve this site, then send again.");
+        }
+        note("success", "1AM reconnected. Continuing the call…");
+        progress("join");
+        result = await run(fresh);
+      }
       setLastResult({
         success: true,
         message: result.status ? `Confirmed (${result.status})` : `Confirmed on ${network.label}`,
@@ -384,12 +421,14 @@ export function ContractInteractPanel() {
       void refreshUntilSettled(activeAddress);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      if (isWalletSessionExpiredMessage(msg)) {
-        lace.markSessionExpired(WALLET_SESSION_EXPIRED_MSG);
-        setLastResult({
-          success: false,
-          message: "1AM connection expired. Run the circuit again to reconnect; your inputs are kept.",
-        });
+      if (err instanceof WalletSessionLostError) {
+        lace.markSessionExpired();
+        const message = err.beforeSubmit
+          ? "1AM disconnected again before the transaction was sent. Reload the page (your work is saved), then send again."
+          : "1AM disconnected after the transaction was sent, so it wasn't sent twice. The contract state below refreshes when it confirms.";
+        note("warn", message);
+        setLastResult({ success: false, message });
+        if (!err.beforeSubmit) void refreshUntilSettled(activeAddress);
       } else {
         setLastResult({ success: false, message: msg });
         addLog({
@@ -403,6 +442,7 @@ export function ContractInteractPanel() {
     }
 
     setCallingCircuit(null);
+    setCallProgress(null);
   }, [
     network,
     selected,
@@ -731,10 +771,17 @@ export function ContractInteractPanel() {
                   disabled={!!callingCircuit || status !== "idle" || !canCallOnChain}
                   title={canCallOnChain ? undefined : (callBlockedReason ?? undefined)}
                 >
-                  {callingCircuit === selected.name
-                    ? "Proving in 1AM…"
-                    : `Send ${selected.name}()`}
+                  {callingCircuit === selected.name ? "Running…" : `Send ${selected.name}()`}
                 </Button>
+                {callingCircuit === selected.name && callProgress && (
+                  <CallProgress
+                    circuit={selected.name}
+                    stage={callProgress.stage}
+                    startedAt={callProgress.startedAt}
+                    sponsored={callProgress.sponsored}
+                    note={callProgress.note}
+                  />
+                )}
                 {!canCallOnChain && callBlockedReason && (
                   <p className="text-2xs text-text-dim leading-relaxed">{callBlockedReason}</p>
                 )}

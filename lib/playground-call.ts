@@ -17,6 +17,10 @@ import { getActiveNetwork } from "@/lib/user-settings";
 import { explainIndexerLimit } from "@/lib/indexer-endpoints";
 import { reportFunnelEvent } from "@/lib/funnel-events";
 import { txExplorerUrl } from "@/lib/explorers";
+import type { TxStage } from "@/lib/contract-runtime";
+
+/** Progress of one Call, for the Contract panel. */
+export type CallStage = "join" | TxStage;
 
 function log(addLog: (l: LogEntry) => void, level: LogEntry["level"], message: string) {
   addLog({ id: generateId(), timestamp: Date.now(), level, message, source: "network" });
@@ -43,6 +47,7 @@ export async function callPlaygroundCircuit(
     }>;
     typeEnv?: import("@/lib/compact-values").CompactTypeEnv;
     feeMode?: "sponsored" | "self";
+    onStage?: (stage: CallStage) => void;
   },
 ): Promise<{
   txId: string;
@@ -120,6 +125,8 @@ export async function callPlaygroundCircuit(
   });
 
   log(addLog, "info", `Joining contract ${contractAddress.slice(0, 16)}… (${slug} @ ${assetBase})`);
+  options?.onStage?.("join");
+  let submitStarted = false;
 
   const { createContractProviders, PlaygroundContractAPI } = await import(
     "@/lib/contract-runtime"
@@ -129,7 +136,15 @@ export async function callPlaygroundCircuit(
     connectedAPI as Parameters<typeof createContractProviders>[0],
     networkConfig(network),
     assetBase,
-    { storeName: `compactlab:${slug}`, feeMode, projectId: options?.projectId },
+    {
+      storeName: `compactlab:${slug}`,
+      feeMode,
+      projectId: options?.projectId,
+      onTxStage: (stage) => {
+        if (stage === "submit") submitStarted = true;
+        options?.onStage?.(stage);
+      },
+    },
   );
 
   const api = new PlaygroundContractAPI(providers, slug, assetBase, {
@@ -173,16 +188,11 @@ export async function callPlaygroundCircuit(
     return txResult;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    const { isWalletSessionExpiredError, isWalletSessionExpiredMessage, WALLET_SESSION_EXPIRED_MSG } =
+    const { isWalletSessionExpiredError, isWalletSessionExpiredMessage, WalletSessionLostError } =
       await import("@/lib/wallet-session");
     if (isWalletSessionExpiredError(err) || isWalletSessionExpiredMessage(msg)) {
-      log(addLog, "warn", WALLET_SESSION_EXPIRED_MSG);
-      log(
-        addLog,
-        "warn",
-        "Call paused. Run the circuit again to reconnect 1AM; your inputs are kept.",
-      );
-      throw new Error(WALLET_SESSION_EXPIRED_MSG);
+      // The Contract panel reconnects 1AM and, if nothing was sent, runs the Call again.
+      throw new WalletSessionLostError(!submitStarted);
     }
     const limit = explainIndexerLimit(msg);
     if (limit) {

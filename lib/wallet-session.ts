@@ -101,3 +101,17 @@ export async function probeWalletSession(
     };
   }
 }
+
+/**
+ * 1AM dropped the session during a Deploy or Call. `beforeSubmit` means the
+ * transaction never left the browser, so reconnecting and running it again
+ * cannot send it twice.
+ */
+export class WalletSessionLostError extends Error {
+  readonly beforeSubmit: boolean;
+  constructor(beforeSubmit: boolean) {
+    super(WALLET_SESSION_EXPIRED_MSG);
+    this.name = "WalletSessionLostError";
+    this.beforeSubmit = beforeSubmit;
+  }
+}
